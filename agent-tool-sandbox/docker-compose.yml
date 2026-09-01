@@ -1,0 +1,49 @@
+# Agent Tool Sandbox —— 完整栈（设计说明书 §5 推荐技术栈）
+#
+# 启动：
+#   docker compose up -d
+#   SANDBOX_BACKEND=docker STORAGE_BACKEND=postgres DATABASE_URL=postgresql://sandbox:sandbox@localhost:5432/sandbox \
+#     uvicorn app.main:app --port 8000
+#
+# 或直接用容器跑 API：
+#   docker compose up --build sandbox-api
+#
+# 注意：Sandbox 真正执行需要把宿主机的 Docker socket 挂进 API 容器，
+# 以便 API 容器替 Agent 创建隔离容器（Docker-out-of-Docker，仅用于学习）。
+services:
+  sandbox-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      STORAGE_BACKEND: postgres
+      DATABASE_URL: postgresql://sandbox:sandbox@postgres:5432/sandbox
+      SANDBOX_BACKEND: docker
+      MAX_CONCURRENCY: "4"
+      LOG_LEVEL: INFO
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sandbox
+      POSTGRES_PASSWORD: sandbox
+      POSTGRES_DB: sandbox
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:

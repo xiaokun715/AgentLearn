@@ -1,0 +1,34 @@
+[project]
+name = "semantic-cache"
+version = "0.1.0"
+description = "LLM 语义缓存 (Semantic Cache) Demo —— Embedding + Vector Similarity + Threshold Policy + TTL + Safety"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+qwen = ["httpx>=0.27"]               # Qwen Embedding（可选，需 DASHSCOPE_API_KEY）
+postgres = ["asyncpg>=0.29"]         # PostgreSQL + pgvector（可选，需 DATABASE_URL）
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["semantic_cache*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

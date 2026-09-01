@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # memory 为默认后端；改为 redis 后需要 redis 服务可用
+      STREAM_BUFFER_BACKEND: memory
+      STREAM_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

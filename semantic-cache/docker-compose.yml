@@ -1,0 +1,26 @@
+# PostgreSQL + pgvector —— Semantic Cache 的推荐升级存储（设计说明书 §28）
+#
+# 使用方式：
+#   docker compose up -d
+#   然后设置环境变量 DATABASE_URL="postgresql://semantic:semantic@localhost:5432/semantic_cache"
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: semantic-cache-pg
+    environment:
+      POSTGRES_USER: semantic
+      POSTGRES_PASSWORD: semantic
+      POSTGRES_DB: semantic_cache
+    ports:
+      - "5432:5432"
+    volumes:
+      - semantic_pg_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro  # 首次启动自动建表
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U semantic -d semantic_cache"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  semantic_pg_data:
