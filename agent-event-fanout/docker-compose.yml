@@ -1,0 +1,38 @@
+# 可选：PostgreSQL + Redis + API + Worker 一键拉起（设计说明书 §29 推荐栈）。
+# 默认（零外部依赖）不需要 Docker：直接 `uvicorn app.main:app` 用 SQLite + 内存队列即可。
+#
+# 用法：
+#   docker compose up -d postgres redis
+#   DATABASE_URL=postgresql://fanout:fanout@localhost:5432/agent_event_fanout \
+#   QUEUE_BACKEND=redis REDIS_URL=redis://localhost:6379/0 \
+#   uvicorn app.main:app --port 8000
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fanout
+      POSTGRES_PASSWORD: fanout
+      POSTGRES_DB: agent_event_fanout
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations/001_init_postgres.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fanout -d agent_event_fanout"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

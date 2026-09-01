@@ -1,0 +1,9 @@
+# 直接安装全部推荐依赖（设计说明书 §29 技术栈）
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.0
+httpx>=0.27
+aiosqlite>=0.20
+redis>=5.0
+pytest>=8.0
+pytest-asyncio>=0.23
