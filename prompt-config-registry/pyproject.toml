@@ -1,0 +1,35 @@
+[project]
+name = "prompt-config-registry"
+version = "0.1.0"
+description = "Prompt 与配置版本管理服务 Demo —— Immutable Version + Mutable Deployment（A/B / Canary / Rollback / Audit / Runtime Resolver）"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+sqlite = ["aiosqlite>=0.20"]        # 默认持久化后端（零外部依赖）
+postgres = ["asyncpg>=0.29"]        # PostgreSQL（可选，需 DATABASE_URL）
+redis = ["redis>=5.0"]              # Redis 缓存（可选，需 REDIS_URL）
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "aiosqlite>=0.20",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

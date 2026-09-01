@@ -1,0 +1,38 @@
+# 可选基础设施 —— 默认 Demo 用 SQLite + 内存缓存即可零依赖运行。
+#
+# 启动 PostgreSQL / Redis：
+#   docker compose up -d
+#
+# 然后以环境变量切换后端（见 README）：
+#   STORAGE_BACKEND=postgres DATABASE_URL="postgresql://registry:registry@localhost:5432/config_registry" \
+#   CACHE_BACKEND=redis REDIS_URL="redis://localhost:6379/0" \
+#   uvicorn app.main:app --port 8000
+services:
+  postgres:
+    image: postgres:16
+    container_name: prompt-config-registry-pg
+    environment:
+      POSTGRES_USER: registry
+      POSTGRES_PASSWORD: registry
+      POSTGRES_DB: config_registry
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./migrations:/docker-entrypoint-initdb.d:ro   # 首次启动自动建表
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registry -d config_registry"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: prompt-config-registry-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
