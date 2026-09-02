@@ -48,6 +48,7 @@ class WebhookWorker:
         retry_policy: RetryPolicy,
         dlq: DLQService,
         metrics: Metrics | None = None,
+        claim_timeout: float = 120.0,
         poll_interval: float = 0.5,
         batch_size: int = 10,
     ) -> None:
@@ -58,6 +59,7 @@ class WebhookWorker:
         self.retry_policy = retry_policy
         self.dlq = dlq
         self.metrics = metrics
+        self.claim_timeout = claim_timeout
         self.poll_interval = poll_interval
         self.batch_size = batch_size
         self._stopped = asyncio.Event()
@@ -78,8 +80,10 @@ class WebhookWorker:
 
     # ---- 入口 2：DB 重试扫描 -------------------------------------------------
     async def process_due(self) -> int:
-        """领取并投递一批到期（PENDING/RETRYING 且到期）的 Delivery。"""
-        due = await self.repo.claim_due_deliveries(self.batch_size, utcnow())
+        """领取并投递一批到期（PENDING/RETRYING 到期，或 DELIVERING 租约超时）的 Delivery。"""
+        due = await self.repo.claim_due_deliveries(
+            self.batch_size, utcnow(), claim_timeout=self.claim_timeout
+        )
         for delivery in due:
             try:
                 await self.deliver_claimed(delivery)

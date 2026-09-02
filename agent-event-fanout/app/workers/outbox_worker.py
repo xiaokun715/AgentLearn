@@ -25,11 +25,13 @@ class OutboxWorker:
         *,
         poll_interval: float = 0.5,
         batch_size: int = 50,
+        claim_timeout: float = 120.0,
     ) -> None:
         self.repo = repo
         self.event_queue = event_queue
         self.poll_interval = poll_interval
         self.batch_size = batch_size
+        self.claim_timeout = claim_timeout
         self._stopped = asyncio.Event()
 
     def stop(self) -> None:
@@ -37,15 +39,21 @@ class OutboxWorker:
 
     async def drain_once(self) -> int:
         """发布一批待发布 Outbox，返回成功发布数。"""
-        entries = await self.repo.claim_outbox_entries(self.batch_size)
+        entries = await self.repo.claim_outbox_entries(
+            self.batch_size, claim_timeout=self.claim_timeout
+        )
         published = 0
         for entry in entries:
             try:
                 await self.event_queue.publish(entry.event_id)
                 await self.repo.mark_outbox(entry.id, OUTBOX_PUBLISHED)
                 published += 1
+            except asyncio.CancelledError:
+                # 关闭/取消：回滚为 PENDING，避免卡在 PROCESSING 永不恢复；继续传播取消
+                await self.repo.mark_outbox(entry.id, OUTBOX_PENDING)
+                raise
             except Exception:  # noqa: BLE001
-                # Queue publish 失败：回滚为 PENDING，避免事件丢失（§26）
+                # Queue publish 失败：回滚为 PENDING，避免事件丢失（§26），继续处理其余条目
                 await self.repo.mark_outbox(entry.id, OUTBOX_PENDING)
                 logger.exception("outbox publish failed, rollback %s", entry.id)
         if published:

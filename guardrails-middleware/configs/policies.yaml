@@ -1,0 +1,47 @@
+# policies.yaml —— 分阶段策略（设计说明书 §14）
+#
+# 关键设计：同一个 Finding 在不同 Stage 拥有不同策略：
+#   PROMPT_INJECTION + INPUT       -> BLOCK    （直接注入）
+#   PROMPT_INJECTION + TOOL_RESULT -> SANITIZE （间接注入：中和后放行进入 Context）
+#   PHONE           + INPUT/OUTPUT -> REDACT
+#   SECRET          + OUTPUT       -> BLOCK    （不能把凭据发给用户）
+#   SCHEMA_MISMATCH + OUTPUT       -> RETRY    （LLM 重新生成）
+
+stages:
+  INPUT:
+    PHONE:            { action: redact }
+    EMAIL:            { action: redact }
+    ID_CARD:          { action: redact }
+    BANK_CARD:        { action: redact }
+    PROMPT_INJECTION: { action: block }
+    SECRET:           { action: block }
+    TOXICITY:         { action: block }
+
+  CONTEXT:
+    # 外部内容（RAG / 记忆 / 网页）进入 Context 前：默认不可信（§3 原则三）
+    PROMPT_INJECTION: { action: sanitize }
+    PHONE:            { action: redact }
+    EMAIL:            { action: redact }
+    ID_CARD:          { action: redact }
+    BANK_CARD:        { action: redact }
+    SECRET:           { action: redact }
+
+  TOOL_RESULT:
+    PROMPT_INJECTION: { action: sanitize }   # §22 间接注入防线
+    PHONE:            { action: redact }
+    EMAIL:            { action: redact }
+    ID_CARD:          { action: redact }
+    BANK_CARD:        { action: redact }
+    SECRET:           { action: redact }
+
+  OUTPUT:
+    PHONE:            { action: redact }
+    EMAIL:            { action: redact }
+    ID_CARD:          { action: redact }
+    BANK_CARD:        { action: redact }
+    SECRET:           { action: block }      # 输出不能泄露凭据（§25）
+    TOXICITY:         { action: block }
+    SCHEMA_MISMATCH:  { action: retry, max_retries: 2 }
+
+defaults:
+  action: allow

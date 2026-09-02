@@ -22,6 +22,7 @@ class OutboxEntry:
     event_id: str
     status: str = OUTBOX_PENDING
     created_at: datetime = field(default_factory=utcnow)
+    updated_at: datetime = field(default_factory=utcnow)
     published_at: datetime | None = None
 
     @classmethod

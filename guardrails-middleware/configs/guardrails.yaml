@@ -1,0 +1,13 @@
+# guardrails.yaml —— 运行参数 + 脱敏模板（设计说明书 §5, §13）
+# category -> 脱敏遮罩；未列出的 category 使用通用 <REDACTED>
+version: 1
+
+redactions:
+  PHONE: "<PHONE_REDACTED>"
+  EMAIL: "<EMAIL_REDACTED>"
+  ID_CARD: "<ID_CARD_REDACTED>"
+  BANK_CARD: "<BANK_CARD_REDACTED>"
+  SECRET: "<SECRET_REDACTED>"
+  PASSWORD: "<SECRET_REDACTED>"
+  TOKEN: "<SECRET_REDACTED>"
+  API_KEY: "<SECRET_REDACTED>"

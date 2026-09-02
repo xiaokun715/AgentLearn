@@ -1,0 +1,98 @@
+# tools.yaml —— Tool Allowlist / 风险 / 参数 Schema（设计说明书 §18, §20, §21）
+#
+# 每个 tool 声明：
+#   allowed_agents  哪些 Agent 可以使用（第二层防线）
+#   risk_level      风险等级（第三层防线 -> risk_policies 决定动作）
+#   require_approval 是否强制人工审批（§28）
+#   schema          参数 JSON Schema（§21：/etc/passwd 之类直接在校验层拒绝）
+#   pattern.message  校验失败时的自定义原因（资源边界语义）
+
+tools:
+  # ---- 只读类：LOW ----------------------------------------------------------
+  search_document:
+    description: 检索内部文档库（只读）
+    allowed_agents: [fault_diagnosis, requirement_analysis, default]
+    risk_level: LOW
+    require_approval: false
+    schema:
+      type: object
+      required: [query]
+      additionalProperties: false
+      properties:
+        query: { type: string, minLength: 1, maxLength: 500 }
+
+  web_search:
+    description: 联网搜索 —— 结果默认不可信，必须过 Tool Result Guard（Demo 6）
+    allowed_agents: [fault_diagnosis, requirement_analysis, environment_recovery, default]
+    risk_level: LOW
+    require_approval: false
+    schema:
+      type: object
+      required: [query]
+      additionalProperties: false
+      properties:
+        query: { type: string, minLength: 1, maxLength: 500 }
+
+  read_file:
+    description: 读取受控目录内的文件
+    allowed_agents: [fault_diagnosis, environment_recovery]
+    risk_level: MEDIUM
+    require_approval: false
+    schema:
+      type: object
+      required: [path]
+      additionalProperties: false
+      properties:
+        path: { type: string }
+    resource_boundary:
+      fields: [path]
+      roots: ["/tmp"]
+
+  # ---- 写/执行类：HIGH / CRITICAL --------------------------------------------
+  execute_shell:
+    description: 执行 shell 命令（高风险，人工审批）
+    allowed_agents: [environment_recovery]
+    risk_level: HIGH
+    require_approval: true
+    schema:
+      type: object
+      required: [command]
+      additionalProperties: false
+      properties:
+        command: { type: string, minLength: 1, maxLength: 1000 }
+
+  delete_file:
+    description: 删除文件 —— 只能删 /tmp 下文件，且需人工审批（Demo 5）
+    allowed_agents: [environment_recovery]
+    risk_level: CRITICAL
+    require_approval: true
+    schema:
+      type: object
+      required: [path]
+      additionalProperties: false
+      properties:
+        path: { type: string }
+    resource_boundary:
+      fields: [path]
+      roots: ["/tmp"]
+
+  send_email:
+    description: 发送邮件（对外部系统产生副作用，需审批）
+    allowed_agents: [fault_diagnosis]
+    risk_level: MEDIUM
+    require_approval: true
+    schema:
+      type: object
+      required: [to, subject]
+      additionalProperties: false
+      properties:
+        to: { type: string, minLength: 3, maxLength: 320 }
+        subject: { type: string, minLength: 1, maxLength: 200 }
+        body: { type: string, maxLength: 10000 }
+
+# 风险等级 -> 动作（第三层防线）
+risk_policies:
+  LOW: allow
+  MEDIUM: allow
+  HIGH: human_approval
+  CRITICAL: human_approval

@@ -57,7 +57,15 @@ class FanoutService:
                 # 同一 (event_id, subscriber_id) 已存在 → 幂等跳过（§09）
                 logger.debug("skip duplicate delivery for %s -> %s", event.id, sub.id)
                 continue
-            await self.delivery_queue.publish(delivery.id)
+            try:
+                await self.delivery_queue.publish(delivery.id)
+            except Exception:  # noqa: BLE001
+                # 单条入队失败不影响其余 Subscriber；该 Delivery 仍是 PENDING，
+                # 会被 webhook worker 的 DB 扫描兜底领取投递。
+                logger.exception(
+                    "fanout publish failed for %s -> %s，DB 扫描将兜底", event.id, sub.id
+                )
+                continue
             if self.metrics is not None:
                 self.metrics.on_delivery_created()
             created += 1

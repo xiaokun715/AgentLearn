@@ -1,0 +1,24 @@
+# Guardrails Middleware 是**无外部依赖**的纯内存 Demo —— 直接 `uvicorn app.main:app` 即可。
+#
+# 需要容器化演示时：
+#   docker compose up --build
+#   然后访问 http://localhost:8000/docs
+#
+# 说明：服务无状态（策略从 configs/ 加载、Audit/Approval 存内存），
+# 生产若要持久化，建议将 Audit/Approval 换成 DB（见 app/audit/repository.py 接口）。
+services:
+  guardrails:
+    image: python:3.11-slim
+    working_dir: /srv/guardrails
+    command: >
+      sh -c "pip install -q --no-cache-dir -e . &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/srv/guardrails
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20

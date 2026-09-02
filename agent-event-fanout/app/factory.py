@@ -136,6 +136,7 @@ async def build_runtime(config: EventFanoutConfig | None = None) -> Runtime:
         repo, event_queue,
         poll_interval=config.outbox_poll_interval,
         batch_size=config.outbox_batch_size,
+        claim_timeout=config.claim_timeout,
     )
     dlq_service = DLQService(repo, delivery_queue)
     webhook_worker = WebhookWorker(
@@ -145,6 +146,7 @@ async def build_runtime(config: EventFanoutConfig | None = None) -> Runtime:
         retry_policy=retry_policy,
         dlq=dlq_service,
         metrics=metrics,
+        claim_timeout=config.claim_timeout,
         poll_interval=config.webhook_poll_interval,
         batch_size=config.webhook_batch_size,
     )

@@ -11,6 +11,19 @@ class SubscriberCreate(BaseModel):
     url: str = Field(..., description="客户 Webhook 地址")
     events: list[str] = Field(..., min_length=1, description="订阅的 Event Type 列表")
 
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: str) -> str:
+        """§06：至少校验 scheme 与 host 存在（SSRF 的轻量防护）。"""
+        from urllib.parse import urlparse
+
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Webhook URL scheme 必须是 http/https，得到 '{parsed.scheme}'")
+        if not parsed.hostname:
+            raise ValueError("Webhook URL 缺少 host")
+        return v
+
     @field_validator("events")
     @classmethod
     def _validate_events(cls, v: list[str]) -> list[str]:

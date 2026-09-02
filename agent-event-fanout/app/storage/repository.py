@@ -9,7 +9,7 @@ import asyncio
 import os
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator
 
 import aiosqlite
@@ -20,7 +20,7 @@ from ..domain.delivery import (
     PENDING,
     RETRYING,
 )
-from ..domain.event import Event
+from ..domain.event import Event, utcnow
 from ..domain.exceptions import ConflictError
 from ..domain.outbox import OUTBOX_PENDING, OUTBOX_PROCESSING, OUTBOX_PUBLISHED, OutboxEntry
 from ..domain.subscriber import Subscriber
@@ -177,11 +177,18 @@ class SqliteDatabase:
     async def execute(self, sql: str, *params: Any) -> int:
         await self._guard.acquire()
         try:
-            cur = await self._require().execute(sql, params)
-            # 不在事务上下文内才自动提交（否则会把 transaction() 的事务提前提交）
-            if self._tx_depth == 0:
-                await self._require().commit()
-            return cur.rowcount
+            try:
+                cur = await self._require().execute(sql, params)
+                # 不在事务上下文内才自动提交（否则会把 transaction() 的事务提前提交）
+                if self._tx_depth == 0:
+                    await self._require().commit()
+                return cur.rowcount
+            except BaseException:
+                # 约束违反等错误会让 sqlite3 留下未提交的隐式事务（in_transaction=True）。
+                # 不回滚的话，下一次 BEGIN 会抛 "cannot start a transaction within a transaction"。
+                if self._tx_depth == 0:
+                    await self._require().rollback()
+                raise
         finally:
             self._guard.release()
 
@@ -216,19 +223,24 @@ class SqliteDatabase:
 
         整个事务持有可重入锁，其他协程的读写被挡在外面，
         保证多语句（如 Event + Outbox）真正原子提交（§26）。
+
+        锁的 acquire/release 包围整个事务（含 BEGIN）——
+        BEGIN 失败也必须释放锁，否则系统永久死锁。
         """
         await self._guard.acquire()
-        conn = self._require()
-        await conn.execute("BEGIN")
-        self._tx_depth += 1
         try:
-            yield self
-            await conn.commit()
-        except BaseException:
-            await conn.rollback()
-            raise
+            conn = self._require()
+            await conn.execute("BEGIN")
+            self._tx_depth += 1
+            try:
+                yield self
+                await conn.commit()
+            except BaseException:
+                await conn.rollback()
+                raise
+            finally:
+                self._tx_depth -= 1
         finally:
-            self._tx_depth -= 1
             self._guard.release()
 
 
@@ -410,18 +422,28 @@ class SqliteRepository(Repository):
             return None
         return _row_to_delivery(rows[0])
 
-    async def claim_due_deliveries(self, batch_size: int, now: datetime) -> list[Delivery]:
+    async def claim_due_deliveries(
+        self, batch_size: int, now: datetime, *, claim_timeout: float = 120.0
+    ) -> list[Delivery]:
+        """领取到期 Delivery（PENDING / RETRYING 且到期）。
+
+        同时回收卡在 DELIVERING 超过租约的 Delivery（§34 at-least-once 的兜底）：
+        Worker 崩溃/异常导致投递中途丢失时，超过 ``claim_timeout`` 会被重新领取重投。
+        """
         async with self.db.transaction():
             rows = await self.db.fetchall_in_tx(
                 "UPDATE webhook_deliveries"
                 " SET status=?, attempt_count=attempt_count+1, updated_at=?"
                 " WHERE id IN ("
                 "   SELECT id FROM webhook_deliveries"
-                "   WHERE status IN (?,?)"
-                "     AND (next_retry_at IS NULL OR next_retry_at <= ?)"
+                "   WHERE (status IN (?,?) AND (next_retry_at IS NULL OR next_retry_at <= ?))"
+                "      OR (status=? AND updated_at <= ?)"
                 "   ORDER BY created_at LIMIT ?"
                 " ) RETURNING *",
-                DELIVERING, to_db(now), PENDING, RETRYING, to_db(now), batch_size,
+                DELIVERING, to_db(now),
+                PENDING, RETRYING, to_db(now),
+                DELIVERING, to_db(now - timedelta(seconds=claim_timeout)),
+                batch_size,
             )
         return [_row_to_delivery(r) for r in rows]
 
@@ -440,38 +462,53 @@ class SqliteRepository(Repository):
     # ---- outbox ------------------------------------------------------------
     async def create_outbox(self, entry: OutboxEntry) -> None:
         await self.db.execute(
-            "INSERT INTO outbox_events (id, event_id, status, created_at, published_at)"
-            " VALUES (?,?,?,?,?)",
-            entry.id, entry.event_id, entry.status, to_db(entry.created_at),
+            "INSERT INTO outbox_events"
+            " (id, event_id, status, created_at, updated_at, published_at)"
+            " VALUES (?,?,?,?,?,?)",
+            entry.id, entry.event_id, entry.status,
+            to_db(entry.created_at), to_db(entry.updated_at),
             to_db(entry.published_at) if entry.published_at else None,
         )
 
-    async def claim_outbox_entries(self, batch_size: int) -> list[OutboxEntry]:
+    async def claim_outbox_entries(
+        self, batch_size: int, *, claim_timeout: float = 120.0
+    ) -> list[OutboxEntry]:
+        """原子领取待发布 Outbox；同时回收卡在 PROCESSING 超过租约的条目。"""
+        now = utcnow()
         async with self.db.transaction():
             rows = await self.db.fetchall_in_tx(
-                "UPDATE outbox_events SET status=?"
+                "UPDATE outbox_events SET status=?, updated_at=?"
                 " WHERE id IN ("
-                "   SELECT id FROM outbox_events WHERE status=? ORDER BY created_at LIMIT ?"
+                "   SELECT id FROM outbox_events"
+                "   WHERE status=? OR (status=? AND updated_at <= ?)"
+                "   ORDER BY created_at LIMIT ?"
                 " ) RETURNING *",
-                OUTBOX_PROCESSING, OUTBOX_PENDING, batch_size,
+                OUTBOX_PROCESSING, to_db(now),
+                OUTBOX_PENDING, OUTBOX_PROCESSING, to_db(now - timedelta(seconds=claim_timeout)),
+                batch_size,
             )
         return [_row_to_outbox(r) for r in rows]
 
     async def mark_outbox(self, entry_id: str, status: str) -> None:
+        now = utcnow()
         if status == OUTBOX_PUBLISHED:
             await self.db.execute(
-                "UPDATE outbox_events SET status=?, published_at=? WHERE id=?",
-                status, to_db(datetime.now(timezone.utc)), entry_id,
+                "UPDATE outbox_events SET status=?, updated_at=?, published_at=?"
+                " WHERE id=?",
+                status, to_db(now), to_db(now), entry_id,
             )
         else:
             await self.db.execute(
-                "UPDATE outbox_events SET status=?, published_at=NULL WHERE id=?",
-                status, entry_id,
+                "UPDATE outbox_events SET status=?, updated_at=?, published_at=NULL"
+                " WHERE id=?",
+                status, to_db(now), entry_id,
             )
 
     async def count_outbox_pending(self) -> int:
+        # 包含 PROCESSING：卡住的条目也不该在健康检查中「隐身」
         row = await self.db.fetchone(
-            "SELECT COUNT(*) AS n FROM outbox_events WHERE status=?", OUTBOX_PENDING
+            "SELECT COUNT(*) AS n FROM outbox_events WHERE status IN (?,?)",
+            OUTBOX_PENDING, OUTBOX_PROCESSING,
         )
         return int(row["n"])
 
@@ -485,9 +522,11 @@ class SqliteRepository(Repository):
                 dumps(event.data), dumps(event.metadata), to_db(event.created_at),
             )
             await self.db.execute(
-                "INSERT INTO outbox_events (id, event_id, status, created_at, published_at)"
-                " VALUES (?,?,?,?,?)",
-                entry.id, entry.event_id, entry.status, to_db(entry.created_at), None,
+                "INSERT INTO outbox_events"
+                " (id, event_id, status, created_at, updated_at, published_at)"
+                " VALUES (?,?,?,?,?,?)",
+                entry.id, entry.event_id, entry.status,
+                to_db(entry.created_at), to_db(entry.updated_at), None,
             )
 
 
@@ -538,5 +577,6 @@ def _row_to_outbox(row: aiosqlite.Row) -> OutboxEntry:
         event_id=row["event_id"],
         status=row["status"],
         created_at=from_db(row["created_at"]),
+        updated_at=from_db(row["updated_at"]) or from_db(row["created_at"]),
         published_at=from_db(row["published_at"]),
     )

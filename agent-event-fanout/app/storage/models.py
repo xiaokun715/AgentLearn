@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     event_id     TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     status       TEXT NOT NULL,
     created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
     published_at TEXT
 );
 

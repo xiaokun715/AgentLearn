@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import time
 
-from ..security.signature import generate_signature, verify_signature
+from ..security.signature import SignatureError, generate_signature, verify_signature
 from .signature_header import (
     HEADER_EVENT_ID,
     HEADER_EVENT_TYPE,
@@ -57,13 +57,16 @@ class Signer:
         body: bytes,
         now: float | None = None,
     ) -> None:
-        verify_signature(
-            secret, int(timestamp), body, signature, tolerance=self.tolerance, now=now
-        )
+        try:
+            ts = int(timestamp)
+        except (TypeError, ValueError) as exc:
+            raise SignatureError("X-Webhook-Timestamp 不是有效整数") from exc
+        verify_signature(secret, ts, body, signature, tolerance=self.tolerance, now=now)
 
 
 __all__ = [
     "Signer",
+    "SignatureError",
     "HEADER_EVENT_ID",
     "HEADER_EVENT_TYPE",
     "HEADER_WEBHOOK_ID",

@@ -37,6 +37,9 @@ class EventFanoutConfig:
     outbox_batch_size: int = 50
     webhook_poll_interval: float = 0.5
     webhook_batch_size: int = 10
+    # 领取租约（秒）：Worker 崩溃/异常导致 Delivery 卡在 DELIVERING、Outbox 卡在
+    # PROCESSING 时，超过该时间会被其他 Worker 回收重投（§34 at-least-once 的兜底）。
+    claim_timeout: float = 120.0
 
     log_level: str = "INFO"
 
@@ -61,5 +64,6 @@ class EventFanoutConfig:
             outbox_batch_size=int(os.getenv("OUTBOX_BATCH_SIZE", "50")),
             webhook_poll_interval=float(os.getenv("WEBHOOK_POLL_INTERVAL", "0.5")),
             webhook_batch_size=int(os.getenv("WEBHOOK_BATCH_SIZE", "10")),
+            claim_timeout=float(os.getenv("CLAIM_TIMEOUT", "120")),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
