@@ -12,7 +12,7 @@ from ..core.decision import Action
 from ..core.exceptions import ConfigError
 from ..policies.loader import _read_yaml
 from .registry import ToolPolicy, ToolRegistry
-from .risk import RiskPolicy
+from .risk import DEFAULT_RISK_ACTIONS, RiskPolicy
 
 
 def load_tools(path: Path) -> tuple[ToolRegistry, RiskPolicy]:
@@ -39,7 +39,9 @@ def load_tools(path: Path) -> tuple[ToolRegistry, RiskPolicy]:
         )
 
     risk_map = data.get("risk_policies", {})
-    mappings: dict[str, Action] = {}
+    # 缺省补齐到 DEFAULT_RISK_ACTIONS：漏配某个风险等级时仍取保守动作（fail-safe），
+    # 而不是 YAML 映射整体替换默认表导致 CRITICAL 静默变成 ALLOW（review 修复）。
+    mappings: dict[str, Action] = dict(DEFAULT_RISK_ACTIONS)
     if isinstance(risk_map, dict):
         for level, action in risk_map.items():
             try:

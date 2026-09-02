@@ -2,6 +2,9 @@
 
 高风险 Tool（execute_shell / delete_file / production_deploy ...）命中后创建一张
 PENDING 票据，等待人类 Approve / Reject；超过 TTL 自动 EXPIRED。
+
+线程安全：get/list/decide 的「查状态 + 改状态」在锁内原子完成（check-and-set），
+避免并发 decide 双批放行（review 修复）。
 """
 from __future__ import annotations
 
@@ -95,27 +98,28 @@ class ApprovalService:
             self._store[req.id] = req
         return req
 
-    def _refresh(self, req: ApprovalRequest) -> None:
-        # 惰性过期：查询/审批时才把超时 PENDING 标记为 EXPIRED
+    def _expire_locked(self, req: ApprovalRequest) -> None:
+        # 惰性过期：查询/审批时才把超时 PENDING 标记为 EXPIRED（须在锁内调用）
         if req.status == "PENDING" and req.expired:
             req.status = "EXPIRED"
 
     def get(self, approval_id: str) -> ApprovalRequest:
         with self._lock:
             req = self._store.get(approval_id)
-        if req is None:
-            raise NotFoundError(f"approval request not found: {approval_id}")
-        self._refresh(req)
-        return req
+            if req is None:
+                raise NotFoundError(f"approval request not found: {approval_id}")
+            self._expire_locked(req)
+            return req
 
     def list(self, status: str | None = None) -> list[ApprovalRequest]:
         with self._lock:
             items = list(self._store.values())
-        for req in items:
-            self._refresh(req)
-        if status:
-            return [r for r in items if r.status == status.upper()]
-        return sorted(items, key=lambda r: r.created_at, reverse=True)
+            for req in items:
+                self._expire_locked(req)
+            if status:
+                items = [r for r in items if r.status == status.upper()]
+            items = sorted(items, key=lambda r: r.created_at, reverse=True)
+        return items
 
     def decide(
         self,
@@ -125,16 +129,21 @@ class ApprovalService:
         decided_by: str = "human",
         note: str = "",
     ) -> ApprovalRequest:
-        req = self.get(approval_id)
-        if req.status == "PENDING":
+        # 整段 check-and-set 放在锁内：并发 decide 只有一个能通过
+        with self._lock:
+            req = self._store.get(approval_id)
+            if req is None:
+                raise NotFoundError(f"approval request not found: {approval_id}")
+            self._expire_locked(req)
+            if req.status != "PENDING":
+                raise InvalidApprovalError(
+                    f"approval request {approval_id} is {req.status}, cannot decide again"
+                )
             req.status = "APPROVED" if approved else "REJECTED"
             req.decided_at = _now()
             req.decided_by = decided_by
             req.decision_note = note
             return req
-        raise InvalidApprovalError(
-            f"approval request {approval_id} is {req.status}, cannot decide again"
-        )
 
 
 __all__ = ["ApprovalService", "ApprovalRequest", "APPROVAL_STATUSES"]

@@ -59,16 +59,21 @@ class Metrics:
     # ---- 渲染 ---------------------------------------------------------------
     def render(self) -> str:
         lines: list[str] = []
+        # 先在锁内拷贝快照，再在锁外排序/渲染，避免并发插入导致迭代期变化
         with self._lock:
-            counters = sorted(
+            counters = [
                 (name, labels, value)
                 for (name, labels), value in self._counters.items()
-            )
-        for name, labels, value in counters:
+            ]
+            samples = [
+                (key, list(deque_samples))
+                for key, deque_samples in self._samples.items()
+            ]
+        for name, labels, value in sorted(counters):
             lines.append(f"{name}{_fmt_labels(labels)} {value}")
 
         # 延迟汇总（P50/P95/P99）
-        for key, samples in sorted(self._samples.items()):
+        for key, samples in sorted(samples):
             if not samples:
                 continue
             name, labels = key
