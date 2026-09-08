@@ -1,0 +1,31 @@
+[project]
+name = "graceful-agent-cancel"
+version = "0.1.0"
+description = "Agent 优雅中止 (Graceful Agent Cancel) Demo —— 前端交互(异步+SSE) / 循环层取消令牌 / 底层 asyncio.Cancel / 兜底回滚+部分产出(Partial Yield)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

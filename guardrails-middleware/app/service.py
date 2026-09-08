@@ -45,6 +45,21 @@ def new_request_id() -> str:
     return f"req_{uuid.uuid4().hex[:16]}"
 
 
+# 审计需要保留 Tool 请求载荷（如 delete_file 的目标路径）以便取证，但敏感参数值只记掩码
+_SECRET_ARG_HINTS = ("password", "token", "secret", "api_key", "apikey", "key")
+
+
+def _audit_safe(arguments: dict) -> dict:
+    out: dict[str, Any] = {}
+    for key, value in arguments.items():
+        name = str(key).lower()
+        if any(h in name for h in _SECRET_ARG_HINTS) and isinstance(value, str):
+            out[key] = "<redacted>" if value else value
+        else:
+            out[key] = value
+    return out
+
+
 class Guardrails:
     """组合全部安全组件，对外暴露 Check 方法（Agent SDK 形态，§33）。"""
 
@@ -246,6 +261,7 @@ class Guardrails:
                 "risk": result.risk_level,
                 "reason": result.reason,
                 "approval_id": result.approval_id,
+                "arguments": _audit_safe(arguments or {}),
             },
         )
         label = "TOOL_CALL"

@@ -20,7 +20,14 @@ DEFAULT_RISK_ACTIONS: dict[str, Action] = {
 
 @dataclass
 class RiskPolicy:
+    # 传入的 mappings 只做覆盖；未覆盖的等级回落到 DEFAULT_RISK_ACTIONS（fail-safe，
+    # 避免漏配 CRITICAL 时静默变 ALLOW —— review 修复 #9）。
     mappings: dict[str, Action] = field(default_factory=lambda: dict(DEFAULT_RISK_ACTIONS))
+
+    def __post_init__(self) -> None:
+        merged = dict(DEFAULT_RISK_ACTIONS)
+        merged.update(self.mappings or {})
+        self.mappings = merged
 
     def action_for_risk(self, risk_level: str) -> Action:
         return self.mappings.get(risk_level.upper(), Action.ALLOW)

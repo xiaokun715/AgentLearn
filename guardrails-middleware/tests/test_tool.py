@@ -39,6 +39,14 @@ async def test_high_risk_tool_requires_approval(g):
     assert not r.blocked
 
 
+async def test_path_traversal_blocked(g):
+    """资源边界必须做规范化校验：/tmp/../etc/passwd 不得绕过 ^/tmp/.* 前缀（review 修复 #4）。"""
+    for bad in ("/tmp/../etc/passwd", "/tmp/../../etc/shadow", "/etc/passwd"):
+        r = await g.check_tool("environment_recovery", "delete_file", {"path": bad})
+        assert r.blocked is True, f"path {bad} 应被拒绝"
+        assert "boundary" in r.reason
+
+
 async def test_low_risk_allowed(g):
     r = await g.check_tool(
         "default", "web_search", {"query": "5G 基站告警手册"}

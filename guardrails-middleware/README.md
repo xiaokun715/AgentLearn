@@ -83,13 +83,13 @@ curl -X POST http://localhost:8000/v1/guardrails/input \
   -d '{"agent":"fault_diagnosis","content":"我的手机号是13812345678"}'
 # → {"action":"redact","content":"我的手机号是<PHONE_REDACTED>", ...}
 
-# 2) Tool Guardrail：delete_file 越界 → BLOCK
+# 2) Tool Guardrail：delete_file 越界（含 /tmp/../etc/passwd 穿越）→ BLOCK
 curl -X POST http://localhost:8000/v1/guardrails/tool \
   -H "Content-Type: application/json" \
   -d '{"agent":"environment_recovery","tool":"delete_file",
        "arguments":{"path":"/etc/passwd"}}'
 # → {"action":"block","risk":"CRITICAL",
-#    "reason":"invalid arguments: arguments.path: Path is outside allowed resource boundary"}
+#    "reason":"invalid arguments: path '/etc/passwd' is outside allowed resource boundary (/tmp)"}
 
 # 3) Output Guardrail：LLM 泄露 API Key → BLOCK
 curl -X POST http://localhost:8000/v1/guardrails/output \
@@ -207,11 +207,12 @@ tools:
     schema:
       type: object
       required: [path]
+      additionalProperties: false
       properties:
-        path:
-          type: string
-          pattern: "^/tmp/.*"
-          message: "Path is outside allowed resource boundary"
+        path: { type: string }
+    resource_boundary:          # 规范化后校验，防 /tmp/../etc/passwd 穿越
+      fields: [path]
+      roots: ["/tmp"]
 ```
 
 `Tool Call` 检查顺序（§19）：Allowlist → Agent Permission → Risk Policy

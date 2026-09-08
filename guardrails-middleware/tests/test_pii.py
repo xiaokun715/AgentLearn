@@ -40,3 +40,11 @@ async def test_no_pii_allow(g):
     assert r.action.value == "allow"
     assert r.blocked is False
     assert r.findings == []
+
+
+async def test_pii_in_dict_key_redacted(g):
+    """Detector 扫描 json.dumps 全文本（含键），改写也必须覆盖 dict 键（review 修复 #2）。"""
+    r = await g.check_input({"13812345678": "call me"})
+    assert r.action.value == "redact"
+    assert "13812345678" not in str(r.content)
+    assert r.content != {"13812345678": "call me"}

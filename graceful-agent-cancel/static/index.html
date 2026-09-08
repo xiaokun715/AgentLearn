@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 优雅中止 · 四道防线控制台</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#171e2e; --line:#263046; --fg:#e6ebf5; --dim:#8fa0bd;
+    --red:#ff4d4f; --green:#52c41a; --blue:#40a9ff; --orange:#faad14; --amber:#ffd666;
+    --purple:#b37feb; --cyan:#36cfc9;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.55 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;}
+  .wrap{max-width:1080px;margin:0 auto;padding:22px 16px 60px;}
+  h1{font-size:20px;margin:0 0 4px;letter-spacing:.5px;}
+  h1 small{color:var(--dim);font-weight:400;font-size:13px;margin-left:8px;}
+  .sub{color:var(--dim);margin:0 0 16px;font-size:13px;}
+  .layers{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px;}
+  .layer{flex:1 1 200px;background:var(--panel);border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;}
+  .layer b{display:block;font-size:12px;color:var(--cyan);margin-bottom:2px;}
+  .layer span{color:var(--dim);font-size:11px;line-height:1.4;display:block;}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:14px;margin-bottom:16px;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  textarea{flex:1;min-width:260px;background:#0b101b;color:var(--fg);
+    border:1px solid var(--line);border-radius:8px;padding:10px;font:13px/1.5 inherit;
+    resize:vertical;min-height:52px;}
+  textarea:focus{outline:none;border-color:var(--blue);}
+  .btn{border:none;border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer;
+    font-weight:600;}
+  .btn-go{background:var(--blue);color:#04101f;}
+  .btn-go:disabled{opacity:.45;cursor:not-allowed;}
+  .btn-stop{background:var(--red);color:#fff;display:inline-flex;align-items:center;gap:6px;}
+  .btn-stop:disabled{opacity:.4;cursor:not-allowed;}
+  .btn-stop .sq{width:12px;height:12px;background:#fff;border-radius:2px;}
+  .btn-ghost{background:transparent;border:1px solid var(--line);color:var(--dim);}
+  .meta{color:var(--dim);font-size:12px;margin-top:8px;}
+  .mode{display:flex;gap:14px;align-items:center;margin-left:4px;font-size:13px;color:var(--dim);}
+  .mode label{cursor:pointer;}
+  .mode input{margin-right:4px;}
+
+  #stream{background:#0b101b;border:1px solid var(--line);border-radius:10px;
+    min-height:260px;max-height:440px;overflow:auto;padding:12px;font:12px/1.7
+    ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-word;}
+  .ev{margin:1px 0;}
+  .t{color:var(--dim);}
+  .x-TASK_CREATED,.x-TASK_STARTED,.x-STEP_STARTED{color:var(--blue)}
+  .x-STEP_COMPLETED{color:#7aa8dd}
+  .x-LLM_THINK_STARTED,.x-LLM_THINK_COMPLETED{color:#7e93b8}
+  .x-TOOL_STARTED{color:var(--purple)}
+  .x-TOOL_CHUNK{color:#4a5874}
+  .x-TOOL_COMPLETED{color:#c79ef5}
+  .x-FACT_COLLECTED{color:var(--green)}
+  .x-CANCELLATION_REQUESTED{color:var(--orange);font-weight:700}
+  .x-LOOP_CANCEL_BREAK,.x-FORCE_CANCELLED,.x-CLEANUP_STARTED,
+  .x-DB_ROLLED_BACK,.x-TEMP_CLEANED{color:#ff9c9e}
+  .x-PARTIAL_YIELD{color:var(--amber);font-weight:700}
+  .x-TASK_COMPLETED{color:var(--green);font-weight:700}
+  .x-TASK_CANCELLED{color:var(--red);font-weight:700}
+  .x-TASK_FAILED{color:var(--red);font-weight:700}
+  .box{background:#10182a;border:1px solid var(--line);border-radius:10px;
+    padding:12px;margin-top:14px;white-space:pre-wrap;display:none;font-size:13px;}
+  #partTitle{color:var(--amber);font-weight:700;margin-bottom:6px;}
+  #partTitle.ok{color:var(--green);}
+  #statusChip{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;
+    background:#20304f;color:#a8c6f2;margin-left:6px;}
+  .badge{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛑 Agent 优雅中止 · 四道防线控制台<small>第十章 Demo · SSE + CancellationToken + asyncio.cancel + Partial Yield</small></h1>
+  <p class="sub">提交一个 Agent 任务 → 通过 SSE 实时看它跑 → 随时点红色 Stop。看它怎么被“优雅叫停”。</p>
+
+  <div class="layers">
+    <div class="layer"><b>① 交互层</b><span>异步提交先拿 task_id，SSE 长连接推送每一步，红色 Stop 按钮下发 CANCEL_TASK。</span></div>
+    <div class="layer"><b>② 循环层</b><span>Agent Loop 每次调 LLM/工具前插桩查取消状态，撞上 cancelled 就跳出（只拦“动作之间”）。</span></div>
+    <div class="layer"><b>③ 底层</b><span>force 取消会对正在跑的 asyncio.Task.cancel()，掐断卡在 20s 网络 I/O 里的协程。</span></div>
+    <div class="layer"><b>④ 兜底层</b><span>捕获中止信号 → 回滚临时表/删除临时文件 → 基于已收集事实输出 Partial Yield。</span></div>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <textarea id="query">请帮我查一下最近 2 天的账单和上海的天气，顺便抓一下某个网页核对信息，然后出一份简报。</textarea>
+      <div class="btn-go-wrap">
+        <button class="btn btn-go" id="runBtn" onclick="run()">▶ 提交任务</button>
+      </div>
+      <button class="btn btn-stop" id="stopBtn" disabled onclick="stop()"><span class="sq"></span>STOP (CANCEL_TASK)</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="mode">
+        <span class="badge">取消方式：</span>
+        <label><input type="radio" name="mode" value="force" checked> force —— 掐断 I/O（层2+层3）</label>
+        <label><input type="radio" name="mode" value="cooperative"> cooperative —— 只标记，下个动作边界跳出（仅层2）</label>
+      </div>
+    </div>
+    <div class="meta" id="meta">尚未提交任务。</div>
+  </div>
+
+  <div class="row" style="justify-content:space-between">
+    <span class="sub" style="margin:0">事件流（EventSource /v1/tasks/&lt;id&gt;/events）</span>
+    <button class="btn btn-ghost" onclick="clearLog()">清空</button>
+  </div>
+  <div id="stream"><div class="t">—— 事件将实时出现在这里 ——</div></div>
+
+  <div class="box" id="finalBox">
+    <div id="partTitle">任务结束</div>
+    <div id="partBody"></div>
+  </div>
+</div>
+
+<script>
+let es=null, currentTask=null, timer=null;
+
+function log(type, text, t){
+  const box=document.getElementById('stream');
+  const p=document.createElement('div');
+  p.className='ev x-'+type;
+  const time=t?new Date(t*1000).toLocaleTimeString()+' ':'';
+  p.innerHTML='<span class="t">'+time+'</span>'+escapeHtml(text);
+  box.appendChild(p); box.scrollTop=box.scrollHeight;
+  return p;
+}
+function escapeHtml(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+async function run(){
+  const q=document.getElementById('query').value.trim()||'查账单和天气';
+  setBusy(true); clearLog(); hideFinal();
+  const r=await fetch('/v1/tasks',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({query:q,city:'上海',days:2,agent:'research_agent'})});
+  const d=await r.json();
+  if(!r.ok){log('TASK_FAILED','提交失败：'+(d.detail||r.status));setBusy(false);return;}
+  currentTask=d.task_id;
+  document.getElementById('meta').textContent='task_id: '+d.task_id+'  (异步已受理，HTTP 请求已返回)';
+  log('TASK_CREATED','[已受理] '+d.task_id+'  打开 SSE 监听进度…');
+  watch(d);
+  // 启动心跳：稍后打开 SSE
+  timer=setTimeout(()=>openSse(),80);
+}
+
+function openSse(){
+  if(!currentTask) return;
+  if(es) es.close();
+  es=new EventSource('/v1/tasks/'+currentTask+'/events');
+  es.onmessage=function(ev){ /* 无 event 字段 */ };
+  es.addEventListener('open',()=>log('TASK_STARTED','— SSE 已连接，开始实时推送 —'));
+  const known=es;
+  function route(name,ev){
+    if(es!==known) return;
+    let p=null;
+    try{p=JSON.parse(ev.data)}catch(e){p=null}
+    const s=(p&&p.seq!=null)?('#'+p.seq+' '):'';
+    log(name, s+line(name,p));
+    if(name==='TASK_COMPLETED'||name==='TASK_CANCELLED'||name==='TASK_FAILED') onDone(name,p);
+  }
+  es.addEventListener('TASK_STARTED',e=>route('TASK_STARTED',e));
+  es.addEventListener('STEP_STARTED',e=>route('STEP_STARTED',e));
+  es.addEventListener('STEP_COMPLETED',e=>route('STEP_COMPLETED',e));
+  es.addEventListener('LLM_THINK_STARTED',e=>route('LLM_THINK_STARTED',e));
+  es.addEventListener('LLM_THINK_COMPLETED',e=>route('LLM_THINK_COMPLETED',e));
+  es.addEventListener('TOOL_STARTED',e=>route('TOOL_STARTED',e));
+  es.addEventListener('TOOL_CHUNK',e=>route('TOOL_CHUNK',e));
+  es.addEventListener('TOOL_COMPLETED',e=>route('TOOL_COMPLETED',e));
+  es.addEventListener('FACT_COLLECTED',e=>route('FACT_COLLECTED',e));
+  es.addEventListener('FINALIZE_STAGING',e=>route('FINALIZE_STAGING',e));
+  es.addEventListener('CANCELLATION_REQUESTED',e=>route('CANCELLATION_REQUESTED',e));
+  es.addEventListener('LOOP_CANCEL_BREAK',e=>route('LOOP_CANCEL_BREAK',e));
+  es.addEventListener('FORCE_CANCELLED',e=>route('FORCE_CANCELLED',e));
+  es.addEventListener('CLEANUP_STARTED',e=>route('CLEANUP_STARTED',e));
+  es.addEventListener('DB_ROLLED_BACK',e=>route('DB_ROLLED_BACK',e));
+  es.addEventListener('TEMP_CLEANED',e=>route('TEMP_CLEANED',e));
+  es.addEventListener('PARTIAL_YIELD',e=>route('PARTIAL_YIELD',e));
+  es.addEventListener('TASK_COMPLETED',e=>route('TASK_COMPLETED',e));
+  es.addEventListener('TASK_CANCELLED',e=>route('TASK_CANCELLED',e));
+  es.addEventListener('TASK_FAILED',e=>route('TASK_FAILED',e));
+}
+
+function line(name,p){
+  const pay=p&&p.payload?p.payload:{};
+  const x=p&&p.payload||p||{};
+  switch(name){
+    case 'STEP_STARTED':return '▶ step「'+pay.step+'」开始';
+    case 'STEP_COMPLETED':return '✔ step「'+pay.step+'」完成';
+    case 'LLM_THINK_STARTED':return '🧠 大模型思考中… '+((pay.prompt||'').slice(0,30));
+    case 'LLM_THINK_COMPLETED':return '🧠 思考完成 ('+pay.chars+' 字)';
+    case 'TOOL_STARTED':return '🔧 调用工具 '+pay.tool+' '+JSON.stringify(pay.args||{});
+    case 'TOOL_CHUNK':return '⬇ '+pay.tool+' 下载分片 '+pay.chunk_index+'/'+pay.total+' (已缓冲 '+pay.buffered_chars+' 字符)';
+    case 'TOOL_COMPLETED':return '🔧 '+pay.tool+' 返回：'+(pay.summary||'');
+    case 'FACT_COLLECTED':return '📌 收集到事实：'+(pay.text||'').slice(0,60);
+    case 'FINALIZE_STAGING':return '💾 开始写临时表/临时文件（'+pay.rows+' 行待入库）…';
+    case 'CANCELLATION_REQUESTED':return '⚠️ 网关已收到 CANCEL_TASK，mode='+pay.mode;
+    case 'LOOP_CANCEL_BREAK':return '⛔ [层2] 循环层在动作边界撞上 cancelled，跳出循环';
+    case 'FORCE_CANCELLED':return '⚡ [层3] asyncio.Task.cancel() 掐断了正在进行的 I/O';
+    case 'CLEANUP_STARTED':return '🧹 [层4] 开始兜底善后（回滚/清理）…';
+    case 'DB_ROLLED_BACK':return '♻️ [层4] 已回滚临时数据表 '+pay.rows_dropped+' 行';
+    case 'TEMP_CLEANED':return '🗑️ [层4] 已删除临时文件 '+(pay.removed_files||[]).length+' 个';
+    case 'PARTIAL_YIELD':return '💬 Partial Yield（部分产出）：'+((pay.text||'').slice(0,40))+'…';
+    case 'TASK_COMPLETED':return '✅ 任务完成 ✅  result='+JSON.stringify(pay.result||{});
+    case 'TASK_CANCELLED':return '🛑 任务已优雅中止（cause='+pay.cause+'）';
+    case 'TASK_FAILED':return '❌ 任务失败：'+(pay.error||'');
+    default:return JSON.stringify(pay);
+  }
+}
+
+async function stop(){
+  if(!currentTask)return;
+  const mode=document.querySelector('input[name=mode]:checked').value;
+  log('CANCELLATION_REQUESTED','→ 正在发送 CANCEL_TASK (mode='+mode+')…');
+  const r=await fetch('/v1/tasks/'+currentTask+'/cancel',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({mode})});
+  const d=await r.json();
+  if(!r.ok){log('TASK_FAILED','取消失败：'+(d.detail||r.status));}
+  else log('CANCELLATION_REQUESTED','← 已受理：'+(d.note||'').slice(0,60)+'…');
+}
+
+function onDone(name,p){
+  setBusy(false);
+  showFinal(name,p);
+  if(es){es.close();es=null;}
+}
+function showFinal(name,p){
+  const b=document.getElementById('finalBox'), t=document.getElementById('partTitle'),
+        body=document.getElementById('partBody');
+  b.style.display='block';
+  if(name==='TASK_COMPLETED'){
+    t.textContent='✅ 任务正常完成'; t.className='ok';
+    body.textContent=JSON.stringify((p&&p.payload&&p.payload.result)||{},null,2);
+  }else if(name==='TASK_CANCELLED'){
+    t.textContent='🛑 任务已根据要求优雅中止 —— 部分产出如下'; t.className='';
+    body.textContent=(p&&p.payload&&p.payload.partial)||'';
+  }else{
+    t.textContent='❌ 任务失败'; t.className='';
+    body.textContent=JSON.stringify((p&&p.payload)||{},null,2);
+  }
+}
+function hideFinal(){document.getElementById('finalBox').style.display='none';}
+function setBusy(b){
+  document.getElementById('runBtn').disabled=b;
+  document.getElementById('stopBtn').disabled=!b;
+  if(!b) currentTask=null;
+  if(timer){clearTimeout(timer);timer=null;}
+}
+function clearLog(){
+  const s=document.getElementById('stream');s.innerHTML='';
+}
+</script>
+</body>
+</html>

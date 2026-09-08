@@ -23,6 +23,8 @@ async def test_json_schema_mismatch_retry(g):
     assert r.retry_guidance
     assert "case_id" in r.retry_guidance
     assert "SCHEMA_MISMATCH" in {f.category for f in r.findings}
+    # policy 的 max_retries 参数被真正消费（review 修复 #10）
+    assert "2 retries" in r.retry_guidance
 
 
 async def test_json_schema_valid_allow(g):
