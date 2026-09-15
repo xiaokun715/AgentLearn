@@ -1,0 +1,123 @@
+# =====================================================================
+# 说明书 §69 推荐技术栈的「接真机」版
+#
+# Demo 默认**不依赖**这里的任何服务：Redis / PostgreSQL / MinIO 在
+# `app/infra/` 里都有同进程的等价替身，克隆下来直接 `python -m app.main`
+# 就能跑通全部场景。
+#
+# 这个 compose 文件的作用是「把替身换成真机」时有个现成的起点：
+#
+#   docker compose up -d
+#   export TOOLPLAT_DB_PATH=postgresql://tool:tool@localhost:5432/toolplatform
+#   export TOOLPLAT_SANDBOX_BACKEND=docker
+#
+# 换真机时要改的只有 `app/infra/` 下的三个实现类（RedisSim / Database / ObjectStore），
+# 上层代码一行都不用动 —— 这正是 §44 把「协调层」与「事实来源」分开的价值。
+# =====================================================================
+
+services:
+
+  # -------------------------------------------------------------------
+  # §42 PostgreSQL —— Durable Source of Truth
+  # tool_execution / tool_result / execution_event / outbox_event
+  # -------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: toolplat-postgres
+    environment:
+      POSTGRES_USER: tool
+      POSTGRES_PASSWORD: tool
+      POSTGRES_DB: toolplatform
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # 首次启动自动建表（migrations/001_init.sql）
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tool -d toolplatform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # -------------------------------------------------------------------
+  # §43 Redis —— 高性能协调层
+  # 幂等键 / 租约 / 分布式锁 / 心跳 / 任务流（Streams 消费者组）
+  # -------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: toolplat-redis
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy noeviction
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # 为什么是 noeviction：协调层的数据（幂等键、租约）**丢一条就是一次重复执行**。
+    # 内存不够时宁可写入失败让上层感知，也不能静默淘汰掉幂等键。
+
+  # -------------------------------------------------------------------
+  # §39 MinIO —— 大结果的 Object Storage
+  # 对应 app/result/artifact.py 与 app/infra/object_store.py
+  # -------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: toolplat-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: toolplat
+      MINIO_ROOT_PASSWORD: toolplat123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------------
+  # 建 bucket（一次性任务，跑完即退）
+  # -------------------------------------------------------------------
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 toolplat toolplat123 &&
+      mc mb --ignore-existing local/tool-artifacts &&
+      echo 'bucket tool-artifacts ready'
+      "
+    restart: "no"
+
+  # -------------------------------------------------------------------
+  # §28 Sandbox 用的镜像（可选）
+  #
+  # 注意：本项目**不把平台本身容器化**。Worker 要创建沙箱容器，
+  # 平台跑在宿主机上时只需挂载 docker.sock 就能做到；
+  # 如果平台自己也在容器里，就变成 DinD（Docker in Docker），
+  # 需要 privileged 模式，安全性反而更差。
+  # -------------------------------------------------------------------
+  sandbox-image:
+    image: python:3.10-slim
+    container_name: toolplat-sandbox-image
+    command: ["python", "-c", "print('sandbox base image ready')"]
+    restart: "no"
+    profiles: ["sandbox"]
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

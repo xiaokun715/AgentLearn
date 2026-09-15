@@ -1,0 +1,47 @@
+# =====================================================================
+# Sandbox 默认资源策略（说明书 §27 / §28）
+#
+# §27 限制：CPU / Memory / Disk / Process / Network / Execution Time / Filesystem
+# §28 Demo 用 Docker Container，生产换 Kubernetes Pod + ResourceQuota + NetworkPolicy
+#
+# backend 取值：
+#   auto    —— 优先 Docker，daemon 不可用则自动退化到 process（默认）
+#   docker  —— 强制 Docker，不可用直接报错
+#   process —— 用子进程 + 资源限制实现，无需 Docker
+# =====================================================================
+
+backend: auto
+
+workspace_root: workspaces
+
+default:
+
+  # ---- 计算与内存 ----
+  cpu: 2.0               # CPU 核数上限
+  memory_mb: 2048        # 内存上限（MB）
+  disk_mb: 4096          # 可写磁盘配额（MB）
+
+  # ---- 时间 ----
+  #
+  # §29 三层超时：Tool Timeout < Sandbox Timeout < Worker Lease Timeout
+  #
+  #   Tool timeout    = 300s   （工具自认的合理上界）
+  #   Sandbox timeout = 310s   （沙箱兜底，比 Tool 宽一点，好让 Tool 自己先报超时）
+  #   Lease           = 330s   （见 recovery.yaml / AppConfig.lease_ttl_seconds）
+  #
+  # 反过来配成「Tool 300s / Lease 30s」就会出现 Tool 还在跑、租约已经过期，
+  # 别的 Worker 以为它死了并开始接管 —— 同一份副作用被执行两次。
+  timeout_seconds: 310
+
+  # ---- 隔离 ----
+  network: false         # §27 默认断网；需要联网的 Tool 必须显式声明
+  max_processes: 20      # 防 fork bomb
+
+  # ---- 文件系统 ----
+  # 只读挂载：Tool 可读不可改（例如测试用例目录）
+  readonly_paths:
+    - /workspace/tests/
+  # 可写目录白名单；留空表示只允许 workspace 自身
+  writable_paths: []
+
+  backend: auto

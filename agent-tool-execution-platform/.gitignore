@@ -1,0 +1,24 @@
+# 运行时产物 —— 每次跑演示都会重新生成，不该进版本库
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# §28 沙箱工作区：每个 call 一个目录
+workspaces/
+
+# §39 大结果对象存储（用 LocalObjectStore 时的落盘位置）
+artifacts/
+
+# §18 LangGraph Checkpoint（默认 sqlite）
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+checkpoints.sqlite
+
+# 本地环境
+.env
+.venv/
+venv/

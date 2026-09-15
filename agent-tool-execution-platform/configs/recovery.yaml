@@ -1,0 +1,86 @@
+# =====================================================================
+# 恢复与重试策略（说明书 §35 / §36 / §30 / §31）
+#
+# 核心观点（§13 / §34）：FAILED 不能简单理解成 "FAILED -> retry"。
+# 必须先经过 ErrorClassifier 分类，再按下面的表决定去向。
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# §36 Retry Policy：Exponential Backoff + Jitter
+#
+#   1s -> 2s -> 4s -> 8s ... 再乘上随机抖动系数
+#
+# 抖动不是为了好看：如果大量 Agent 在同一时刻失败，没有抖动它们会在同一时刻
+# 一起重试，把下游直接打死（§36 提到的「服务雪崩」）。
+# ---------------------------------------------------------------------
+retry:
+  max_attempts: 3
+  initial_backoff_ms: 1000
+  max_backoff_ms: 30000
+  multiplier: 2.0
+  jitter_ratio: 0.3
+  retry_on:
+    - timeout
+    - network_error
+    - resource_exhausted
+    - sandbox_error
+
+# ---------------------------------------------------------------------
+# §35 Recovery Policy：错误分类 -> 处置动作
+#
+# | Error              | 策略                       |
+# | ------------------ | -------------------------- |
+# | 参数错误            | 参数修复（REPAIR）          |
+# | 权限错误            | Stop（ABORT）              |
+# | Timeout            | Retry / Increase timeout   |
+# | Network Error      | Retry + Backoff            |
+# | 429                | Backoff                    |
+# | 503                | Retry                      |
+# | Resource Exhausted | 降低资源 / 换节点（RETRY）  |
+# | Tool Not Found     | Fallback                   |
+# | Sandbox Error      | 新建 Sandbox（RETRY）       |
+# | Business Error     | 根据业务规则（默认 ABORT）  |
+# | 高风险错误          | Human                      |
+# ---------------------------------------------------------------------
+recovery:
+  actions:
+    validation_error: REPAIR
+    permission_error: ABORT
+    timeout: RETRY
+    network_error: RETRY
+    resource_exhausted: RETRY
+    tool_not_found: FALLBACK
+    business_error: ABORT
+    sandbox_error: RETRY
+    internal_error: ABORT
+
+  # §56 租约过期 + 执行状态不确定（uncertain）时的处置。
+  #
+  # 这是说明书里最微妙的一段：Worker A 可能并没有死，只是网络断了。
+  # 如果 Tool 有真实副作用，让 Worker B 直接重跑就会产生两次副作用。
+  # 所以按风险等级分流：
+  #   high -> 交给人工（HUMAN）
+  #   low  -> 允许重试（RETRY）
+  uncertain_high_risk_action: HUMAN
+  uncertain_low_risk_action: RETRY
+
+# ---------------------------------------------------------------------
+# §30 / §31 / §32 重复执行与循环检测
+#
+# 不是发现一次重复就停止，而是逐级升级：
+#   第一次 -> WARNING
+#   第二次 -> DEGRADED（降级：改 query / 降 top_k / 换 fallback）
+#   第三次 -> STOP
+# ---------------------------------------------------------------------
+loop:
+  window_seconds: 60        # 「短时间窗」：超出窗口的相同调用不算重复
+
+  duplicate_warn: 2
+  duplicate_degrade: 3
+  duplicate_stop: 5
+
+  cycle_warn: 2
+  cycle_degrade: 3
+  cycle_stop: 4
+
+  max_execution_path: 200

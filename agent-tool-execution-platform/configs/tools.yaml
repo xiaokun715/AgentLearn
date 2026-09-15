@@ -1,0 +1,293 @@
+# =====================================================================
+# Tool Registry 声明（说明书 §59）
+#
+# 代码里声明的 ToolMetadata 是默认值，这里只覆盖需要调的部分。
+# 新增 Tool 不必先写这里；运维调参也不必改代码。
+#
+# 每一条覆盖支持：
+#   version / mode / estimated_duration_ms / timeout_ms / risk /
+#   fallback_tool / idempotency_level / permissions /
+#   retry {…} / sandbox {…} / params {…}
+#
+# §25 的「参数安全策略」写在 params 下，逐参数声明。
+# =====================================================================
+
+tools:
+
+  # ------------------------------------------------------------------
+  # 同步 Tool：执行时间 < 5~10s（§4.1）
+  # ------------------------------------------------------------------
+  calculator:
+    version: "1.0"
+    mode: sync
+    estimated_duration_ms: 50
+    timeout_ms: 2000
+    risk: low
+    idempotency_level: pure
+    permissions: []
+    retry:
+      max_attempts: 2
+      initial_backoff_ms: 200
+      max_backoff_ms: 2000
+    sandbox:
+      cpu: 0.5
+      memory_mb: 128
+      # §29：Tool(2s) < Sandbox(12s)
+      timeout_seconds: 12
+      network: false
+      backend: process
+    params:
+      expression:
+        type: string
+        max_length: 512
+        injection_check: true          # 表达式里出现 `import` / `__` 之类直接拦
+
+  search_knowledge:
+    version: "1.0"
+    mode: sync
+    estimated_duration_ms: 2000
+    timeout_ms: 10000
+    risk: low
+    idempotency_level: pure
+    permissions:
+      - knowledge.read
+    retry:
+      max_attempts: 3
+      initial_backoff_ms: 500
+      max_backoff_ms: 8000
+    sandbox:
+      cpu: 1
+      memory_mb: 512
+      # §29：Tool(10s) < Sandbox(20s)
+      timeout_seconds: 20
+      network: false
+    params:
+      query:
+        type: string
+        min_length: 1
+        max_length: 400
+        injection_check: true
+      top_k:
+        type: integer
+        minimum: 1
+        maximum: 20
+        repair_forbidden: true        # §33 降级会「降低 top_k」，但不许 LLM 自动放大
+
+  # ------------------------------------------------------------------
+  # 异步 Tool：执行时间 > 10s（§4.2）
+  # ------------------------------------------------------------------
+  run_test:
+    version: "1.0"
+    mode: async
+    estimated_duration_ms: 120000
+    timeout_ms: 600000
+    risk: medium
+    idempotency_level: idempotent    # §57：崩溃后可以直接接管重跑
+    permissions:
+      - test.execute
+    fallback_tool: run_test_dry_run
+    retry:
+      max_attempts: 3
+      initial_backoff_ms: 1000
+      max_backoff_ms: 30000
+      jitter_ratio: 0.3
+    sandbox:
+      cpu: 4
+      memory_mb: 4096
+      # §29 三层超时必须有序：Tool(600s) < Sandbox(610s) < Lease(600+30=630s)
+      #
+      # 这个值比 §29 的示例（300/310/330）大，是因为 §5 给 run_test 声明的
+      # timeout_ms 本身就是 600000。**关键是顺序**，不是具体数字：
+      # 一旦写成 Tool 600s / Sandbox 310s，沙箱会在 Tool 还没到自己的超时前
+      # 就把它杀掉，Tool 层永远等不到「可读的自超时错误」，只能拿到一个
+      # 无法区分「跑太久」还是「沙箱故障」的模糊失败。
+      timeout_seconds: 610
+      network: false
+      max_processes: 20
+      backend: process
+    params:
+      test_cases:
+        type: array
+        min_length: 1
+        max_length: 50
+        pattern: "^TC[0-9]{3}$"
+      timeout:
+        type: integer
+        minimum: 1
+        maximum: 600
+        repair_forbidden: true      # §23：不许把 300 自愈成 300000
+      path:
+        type: string
+        allowed_prefix:
+          - /workspace/tests/
+          - workspaces/
+        injection_check: true
+
+  # run_test 的降级替代（§35 FALLBACK）。
+  # 它必须被注册，否则 run_test 声明在 fallback_tool 里的名字解析不到，
+  # 「换个等价 Tool 再试」会退化成「彻底失败」。
+  run_test_dry_run:
+    version: "1.0"
+    mode: sync                     # 只做静态校验，不启进程，无需进队列
+    estimated_duration_ms: 20
+    timeout_ms: 5000
+    risk: low
+    idempotency_level: pure
+    permissions: []                # 只读校验，不产生任何副作用，无需额外权限
+    retry:
+      max_attempts: 1
+      initial_backoff_ms: 0
+      max_backoff_ms: 0
+    sandbox:
+      cpu: 0.5
+      memory_mb: 128
+      timeout_seconds: 15          # §29：Tool(5s) < Sandbox(15s)
+      network: false
+    params:
+      test_cases:
+        type: array
+        min_length: 1
+        max_length: 50
+      timeout:
+        type: integer
+        minimum: 1
+        maximum: 600
+
+  execute_python:
+    version: "1.0"
+    mode: async
+    estimated_duration_ms: 15000
+    timeout_ms: 60000
+    risk: medium
+    idempotency_level: idempotent
+    permissions:
+      - code.execute
+    retry:
+      max_attempts: 2
+      initial_backoff_ms: 500
+      max_backoff_ms: 5000
+    sandbox:
+      cpu: 2
+      memory_mb: 1024
+      disk_mb: 512
+      # §29：> Tool timeout(60s)，且留 15s 余量让 Tool 走完「自超时 -> 上报 -> 落库 -> 写事件」
+      timeout_seconds: 75
+      network: false                 # §27：默认断网
+      max_processes: 10
+      backend: process
+    params:
+      code:
+        type: string
+        max_length: 20000
+        injection_check: true
+      stdin:
+        type: string
+        max_length: 10000
+
+  large_file_analysis:
+    version: "1.0"
+    mode: async
+    estimated_duration_ms: 45000
+    timeout_ms: 300000
+    risk: low
+    idempotency_level: idempotent
+    permissions:
+      - file.read
+    retry:
+      max_attempts: 2
+      initial_backoff_ms: 1000
+      max_backoff_ms: 10000
+    sandbox:
+      cpu: 2
+      memory_mb: 2048
+      disk_mb: 8192
+      timeout_seconds: 310
+      network: false
+    params:
+      path:
+        type: string
+        allowed_prefix:
+          - /workspace/data/
+          - workspaces/
+        denied_prefix:
+          - /etc/
+          - /root/
+          - C:\\Windows\\
+        injection_check: true
+      chunk_size:
+        type: integer
+        minimum: 1024
+        maximum: 1048576
+
+  # ------------------------------------------------------------------
+  # 高风险 Tool：§51 Human-in-the-loop
+  # 这个 Tool 的存在意义就是「不该自动执行」——
+  # 风险等级 HIGH 由 Risk Engine 拦截，进 WAITING_HUMAN（§67）。
+  # ------------------------------------------------------------------
+  database_delete:
+    version: "1.0"
+    mode: async
+    estimated_duration_ms: 3000
+    timeout_ms: 30000
+    risk: high                      # §51 高风险 Tool：production.deploy / database.delete / …
+    idempotency_level: non_idempotent   # §57：NON_IDEMPOTENT -> 崩溃后必须人工确认
+    permissions:
+      - database.write
+      - database.delete
+    retry:
+      max_attempts: 1               # 非幂等副作用一律不自动重试
+      initial_backoff_ms: 0
+      max_backoff_ms: 0
+      retry_on: []                  # 空列表 = 任何错误都不重试
+    sandbox:
+      cpu: 1
+      memory_mb: 512
+      # §29：> Tool timeout(30s)，留 15s 收尾余量
+      timeout_seconds: 45
+      network: false
+    params:
+      table:
+        type: string
+        allowed:
+          - demo_orders
+          - demo_test_records
+        injection_check: true
+      where:
+        type: string
+        max_length: 500
+        injection_check: true       # §24 SQL Injection
+      confirm_token:
+        type: string
+        max_length: 128
+
+# =====================================================================
+# §26 Permission Check —— principal -> 允许的 action
+#
+# Agent 身份决定它能碰什么。注意 agent_risky 有 test.execute
+# 但没有 database.delete：它调 database_delete 会被权限层直接拒绝（§26 Test 8）。
+# =====================================================================
+permissions:
+
+  agent_01:
+    - knowledge.read
+    - test.execute
+    - code.execute
+    - file.read
+
+  agent_02:
+    - knowledge.read
+    - test.execute
+
+  # 故意不给 database.delete —— 用于演示「权限不足不 retry」
+  agent_no_db:
+    - knowledge.read
+    - test.execute
+
+  # 管理员身份：可以做高风险操作（但仍需人工审批，权限 ≠ 免审批）
+  admin_agent:
+    - knowledge.read
+    - test.execute
+    - code.execute
+    - file.read
+    - database.write
+    - database.delete

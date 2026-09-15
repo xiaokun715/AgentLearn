@@ -1,0 +1,45 @@
+[project]
+name = "agent-tool-execution-platform"
+version = "0.1.0"
+description = "Agent Tool Execution Platform —— 基于 LangGraph 的可靠工具执行系统（Gateway → Idempotency → Lease → Sandbox → Recovery）"
+readme = "README.md"
+requires-python = ">=3.10"
+
+# 核心依赖刻意保持极少：Demo 的可靠性语义全部由 stdlib + pydantic 实现，
+# Redis / PostgreSQL / MinIO 都提供了同进程的等价替身（见 app/infra/）。
+dependencies = [
+    "pydantic>=2.0",       # §21 参数 Schema 校验与 §5 Tool Metadata
+    "pyyaml>=6.0",         # configs/*.yaml（§59 Tool Registry 声明）
+    "langgraph>=0.2",      # §18 Checkpoint / §49 Interrupt / §52 Human-in-the-loop
+]
+
+[project.optional-dependencies]
+# 接真机时启用。Demo 默认不需要其中任何一个。
+docker = ["docker>=7.0"]        # §28 Docker 沙箱后端
+redis = ["redis>=5.0"]          # §43 Redis 协调层
+postgres = ["psycopg[binary]>=3.1"]  # §42 PostgreSQL Source of Truth
+minio = ["minio>=7.2"]          # §39 大结果的 Object Storage
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[project.scripts]
+tool-platform = "app.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
