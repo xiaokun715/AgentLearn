@@ -1,2 +1,47 @@
+# =====================================================================
+# 仓库级忽略规则
+#
+# 这里只放「跨项目通用」的构建产物与本地环境。
+# 与具体 Demo 相关的路径（沙箱工作区、artifact 存储等）写在各子项目的
+# .gitignore 里 —— 让规则跟着它描述的东西走，好过在根目录堆一张大表。
+# =====================================================================
+
+# ---- IDE / 编辑器 ----
 .idea/
-/stream-infra/streaminfra.egg-info/
+.vscode/
+*.swp
+*~
+
+# ---- Python 字节码与构建产物 ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# ---- 测试与静态检查缓存 ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.deepeval/
+
+# ---- 本地虚拟环境 ----
+.venv/
+venv/
+env/
+
+# ---- 运行时状态：本地数据库 ----
+#
+# 这些是跑 demo / 测试时生成的 SQLite 文件（LangGraph checkpoint、
+# 各项目的本地状态库），不是源码 —— 每次运行都会重建，进版本库只会制造噪声 diff。
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# ---- 本地环境变量（可能含密钥，绝不入库）----
+.env
+.env.*
+!.env.example
