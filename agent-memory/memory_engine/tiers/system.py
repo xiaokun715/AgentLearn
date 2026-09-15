@@ -56,8 +56,9 @@ CANNED_5G = CannedScenario(
 )
 
 CANNED_EPISODIC_SEED = [
-    # (subject, predicate, object_value) —— 说明书中"上次遇到基带告警如何排查"的同类经验
-    ("基带告警", "排障经验", "先查 MME 话统的 PRB/上行干扰指标，再抓 S1 信令定位异常小区"),
+    # (subject, predicate, object_value) —— 说明书中"上次遇到 XX 如何排查"的同类经验。
+    # subject 刻意选取 demo 会话会“原样追问”的话题词，让词袋嵌入能稳定命中。
+    ("5G 基站闪断", "排障经验", "先查小区级退服/闪断计数，再看切换失败率与上行干扰，最后核查邻区漏配与射频告警"),
     ("VoLTE 掉话", "排障经验", "优先核查 EPS fallback 后无 4G 邻区导致的掉话，需补邻区"),
     ("上行干扰", "排障经验", "上行干扰多为外部干扰源：关站轮询 + 扫频仪定位后上报处理"),
     ("NR 切换失败", "排障经验", "切换失败先看测量报告与目标小区负载，排除同频干扰再查参数"),
@@ -195,6 +196,7 @@ class AgentMemorySystem:
                         subject=r.subject,
                         object_value=r.object_value,
                         predicate=r.predicate,
+                        confidence=r.confidence,  # 保留反思初始的低置信度, 靠 Touch 强化
                     )
                 )
         self.shortterm.append("assistant", f"完成「{goal}」,已沉淀 {len(facts)} 条经验")

@@ -1,0 +1,11 @@
+{
+  "user_id": "alice",
+  "goal": "排查 5G 基站闪断",
+  "steps": [
+    {"action": "查小区退服计数", "ok": true},
+    {"action": "看切换失败率", "ok": true},
+    {"action": "核查邻区漏配", "ok": true},
+    {"action": "重启小区观察", "ok": true}
+  ],
+  "outcome": true
+}

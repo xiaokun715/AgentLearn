@@ -43,7 +43,12 @@ class SemanticMemory:
         self.engine = engine
 
     def save_rule(
-        self, user_id: str, subject: str, object_value: str, predicate: str = "规则"
+        self,
+        user_id: str,
+        subject: str,
+        object_value: str,
+        predicate: str = "规则",
+        confidence: float = 1.0,
     ) -> MemoryRecord:
         return self.engine.remember(
             user_id=user_id,
@@ -51,6 +56,7 @@ class SemanticMemory:
             predicate=predicate,
             object_value=object_value,
             memory_type=SEMANTIC,
+            confidence=confidence,
         )
 
     def point_query(self, user_id: str, subject: str) -> list[MemoryRecord]:

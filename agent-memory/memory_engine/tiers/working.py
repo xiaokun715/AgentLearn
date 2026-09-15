@@ -44,7 +44,7 @@ class Frame:
 class WorkingMemory:
     """有预算的上下文窗口。超出 budget 时按“最旧先裁”淘汰非保护帧。"""
 
-    PROTECTED = {"system"}  # 顶部的系统约束永不淘汰
+    PROTECTED = {"system", "profile"}  # 系统约束 + 用户画像(每次请求静态热加载)钉住不裁
 
     def __init__(self, budget_units: int = 600) -> None:
         self.budget = budget_units
@@ -68,16 +68,20 @@ class WorkingMemory:
 
     # ------------------------------------------------------------------
     def _enforce_budget(self) -> None:
-        """超预算就从头(最旧)裁非保护帧；全裁完还不够就截断保护帧文本。"""
-        while self.used_units() > self.budget:
-            # 找第一个非保护帧(帧按时间序排列，靠前的更旧)
-            idx = next(
-                (i for i, f in enumerate(self.frames) if f.kind not in self.PROTECTED),
-                None,
-            )
-            if idx is None:
-                break  # 只剩 protected，无法再丢帧(保护帧截断在 assemble 前由调用方负责)
-            evicted = self.frames.pop(idx)
+        """超预算就从最旧的非保护帧开始裁。
+
+        原则：system/profile 帧钉住不裁；且永远保留“最新那一帧”(刚产生的动作/工具返回不能丢，
+        它是当前推理的产物) —— 真实工作记忆正是丢弃旧的、给新的腾地方。
+        """
+        # 有多少“可裁”的帧(非 protected)？
+        def evictable() -> list[int]:
+            return [
+                i for i, f in enumerate(self.frames) if f.kind not in self.PROTECTED
+            ]
+
+        while self.used_units() > self.budget and len(evictable()) > 1:
+            oldest = evictable()[0]  # 帧按时间序排列，最靠前 = 最旧
+            evicted = self.frames.pop(oldest)
             self.trimmed.append(evicted)
 
     # ------------------------------------------------------------------

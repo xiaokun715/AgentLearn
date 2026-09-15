@@ -38,7 +38,10 @@ class EpisodicMemory:
         memory_type: MemoryType = EPISODIC,
         confidence: float = 1.0,
     ) -> MemoryRecord:
-        """把一条沉淀下来的经验写入情景/语义记忆(向量自动编码)。"""
+        """把一条沉淀下来的经验写入情景/语义记忆。
+
+        embedding 交给引擎自动按「subject·predicate·object_value」文档编码(与 remember 同一路径)。
+        """
         return self.engine.remember(
             user_id=user_id,
             subject=subject,

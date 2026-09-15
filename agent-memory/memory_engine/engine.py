@@ -77,9 +77,18 @@ class MemoryEngine:
         object_value: str,
         memory_type: MemoryType = SEMANTIC,
         confidence: float = 1.0,
+        embedding: Optional[list[float]] = None,
     ) -> MemoryRecord:
-        """插入并返回(embedding 由引擎自动计算)。"""
-        record = self.insert(user_id, subject, predicate, object_value, memory_type)
+        """插入并返回(embedding 缺省用「subject·predicate·object_value」文档编码)。
+
+        ``insert``(忠于说明书)在无 embedding 时只编码 object_value；本糖方法为了词袋嵌入
+        也能稳定召回，默认编码整个三元组 —— 类似真实 RAG 索引“标题+正文”。
+        """
+        if embedding is None:
+            embedding = self.embedder.embed(
+                f"{subject} {predicate} {object_value}"
+            )
+        record = self.insert(user_id, subject, predicate, object_value, memory_type, embedding)
         record.confidence = confidence
         return record
 
