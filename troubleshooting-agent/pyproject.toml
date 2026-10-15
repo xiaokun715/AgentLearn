@@ -1,0 +1,40 @@
+[project]
+name = "troubleshooting-agent"
+version = "0.1.0"
+description = "Troubleshooting Agent —— 证据驱动、可验证、受控恢复的排障智能体 Demo（FailureContext → 分类 → 多假设 → 信息增益选检查 → 动态 Workflow → 受控恢复 → 经验沉淀）"
+readme = "README.md"
+requires-python = ">=3.10"
+
+# 依赖刻意保持极少：本 Demo 的排障语义全部由 stdlib + pydantic 实现。
+# 「LLM 分类/假设/规划」由一个确定性的 ScriptedLLM 扮演（见 app/llm.py），
+# 目的是让演示可复现 —— 真实接入时把这个类换成模型调用即可，上层一行不用改。
+dependencies = [
+    "pydantic>=2.0",    # §3 统一故障上下文 / §5.1 假设记录 / §6.3 结构化节点计划
+    "pyyaml>=6.0",      # configs/*.yaml（诊断动作池的声明式部分）
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+troubleshoot = "app.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]

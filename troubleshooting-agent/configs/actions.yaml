@@ -1,0 +1,34 @@
+# 诊断动作池的**声明式覆盖层**
+#
+# 约定（与第十二章工具执行平台的 configs/tools.yaml 一致）：
+#   - 代码里给默认值（app/planning/actions.py），本文件只做覆盖；
+#   - 只能覆盖已存在的动作，**不允许新增**未知动作 —— 否则运维改一次配置
+#     就能凭空造出一个没有实现、没有权限元数据的「动作」；
+#   - 能覆盖的字段：tier / cost / risk / timeout_seconds / max_attempts /
+#     side_effect / idempotent / permission / resource / likelihoods。
+#
+# 真机上这些数字应当来自历史标注数据（诊断耗时统计、动作成功率、
+# 误恢复记录），而不是拍脑袋。Demo 里的默认值是可解释的示意值。
+#
+# 注意：likelihoods 一旦覆盖，**必须**保持「每行在 declared_outcomes 上求和为 1」，
+# 并且覆盖该假设的全部可能结果 —— `check_config()` 会在启动时校验这两条。
+
+actions:
+  # 原始日志体积大、拉取慢，真机上还要走对象存储，成本明显高于解析后的日志分析。
+  retrieve_raw_log:
+    cost: 3.0
+    timeout_seconds: 10.0
+
+  # 历史案例检索依赖经验库的向量索引，成本不高但也没有区分力（见 actions.py 注释）。
+  retrieve_failure_cases:
+    cost: 0.8
+
+  # 重新申请环境要动资源池，真机上需要配额审批，风险略高于 Demo 默认值。
+  reallocate_environment:
+    risk: 0.35
+
+  # 重启设备在任何团队都属于需要审批的动作，这里把超时放宽到 60s
+  # （真实设备重启往往要几十秒），但**分级保持 R3**，不放任自动执行。
+  restart_device:
+    timeout_seconds: 60.0
+    max_attempts: 1        # 重启不做自动重试：重试前必须重新走审批
