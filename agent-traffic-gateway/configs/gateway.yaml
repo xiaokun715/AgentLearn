@@ -1,0 +1,63 @@
+# Agent 流量网关的热配置（§18 最后一条反模式）
+#
+# 「限流阈值写死在代码里」是排障时最致命的一条：出故障时改不动阈值，
+# 等于把最后的阀门焊死了。所以本 Demo 把**所有**治理阈值集中在这一处，
+# 允许运行时覆盖（factory.load_config）。
+#
+# 约定：
+#   · 代码里给默认值，本文件只做覆盖；
+#   · 只允许覆盖**已存在**的键，拼错的键会直接报错而不是被静默忽略
+#     —— 静默忽略一个阈值，等于让运维以为自己改了、但其实没改；
+#   · 这份文件列出全部默认值，改哪一行都可以。
+#
+# 四个最值得注意的数值：
+#   upstream_concurrency  Little's Law 里的 L，容量的唯一直接控制手段（§2.2）
+#   request_budget_ms     端到端预算，而不是每层各设一个超时（§11.2）
+#   shed_*_pressure       丢弃阈值用「排队压力」而不是并发利用率（§13.1）
+#   retry_budget_ratio    重试预算；置为 null 等于朴素重试（§12.2）
+
+admission_enabled: true
+admission_safety: 0.9
+aging_per_second: 0.5
+autoscale_cold_start_ms: 5000
+autoscale_enabled: false
+autoscale_queue_threshold: 24
+autoscale_signal: QUEUE_DEPTH
+autoscale_step: 4
+breaker_cooldown_ms: 5000
+breaker_enabled: true
+breaker_failure_ratio: 0.5
+breaker_half_open_probes: 3
+breaker_min_samples: 20
+breaker_window_ms: 10000
+cache_ttl_jitter: 0.25
+cache_ttl_ms: 60000
+coalescing_enabled: true
+degrade_enabled: true
+degrade_from_pressure: 0.8
+degrade_service_factor: 0.35
+edge_burst: 400
+edge_rps: 200.0
+l1_capacity: 2048
+l2_capacity: 16384
+queue_capacity: 64
+queue_policy: PRIORITY_AGING
+request_budget_ms: 9000
+retry_base_ms: 200
+retry_budget_ratio: 0.1
+retry_cap_ms: 2000
+retry_enabled: true
+retry_max_attempts: 3
+semantic_cache_enabled: true
+service_time_estimate_ms: 1500
+shed_critical_pressure: 6.0
+shed_hard_pressure: 2.5
+shed_soft_pressure: 1.0
+shedding_enabled: true
+sweep_expired: true
+sweep_interval_ms: 50
+tenant_burst: {}
+tenant_rps: {}
+tenant_weights: {}
+throughput_window_ms: 3000
+upstream_concurrency: 8

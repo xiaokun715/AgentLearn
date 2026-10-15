@@ -1,0 +1,39 @@
+[project]
+name = "agent-traffic-gateway"
+version = "0.1.0"
+description = "Agent Traffic Gateway —— 高并发大流量下的流量治理与容量工程 Demo（限流 / 准入控制 / 排队调度 / 请求合并 / 分层缓存 / 并发控制 / 重试预算 / 熔断 / 降级 / 弹性伸缩）"
+readme = "README.md"
+requires-python = ">=3.10"
+
+# 依赖刻意保持极少：全章的结论都由一个**确定性离散时间仿真器**产出，
+# 不需要真集群、不需要压测工具、不需要下游 LLM。见 README「为什么用仿真器」。
+dependencies = [
+    "pydantic>=2.0",    # 热配置校验（§18 最后一条：阈值必须是运行时可变且受校验的）
+    "pyyaml>=6.0",      # configs/gateway.yaml
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+traffic-gateway = "app.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
