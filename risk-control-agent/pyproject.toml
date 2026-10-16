@@ -1,0 +1,39 @@
+[project]
+name = "risk-control-agent"
+version = "0.1.0"
+description = "Risk Control Agent —— 传统风控（在线确定性决策）与 Agent（离线动态调查）的分层协作 Demo"
+readme = "README.md"
+requires-python = ">=3.10"
+
+# 依赖刻意保持极少：全章的结论都由确定性的「在线流水线 + 动态调查器」产出。
+# LLM 由 ScriptedLLM 扮演（app/llm.py），接真机时换掉那一个类即可。
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",      # configs/rules.yaml、configs/tools.yaml
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+risk-agent = "app.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]

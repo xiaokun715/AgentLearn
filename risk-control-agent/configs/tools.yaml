@@ -1,0 +1,32 @@
+# 调查工具清单的声明式覆盖层
+#
+# 约定（与本书其它章节一致）：
+#   · 代码里声明工具的默认元数据（app/domain/policy.py::TOOL_SPECS）；
+#   · 本文件只做**覆盖**，且只能覆盖**已存在**的工具 ——
+#     允许 YAML 凭空造一个工具，等于让运维改一次配置就能给 Agent
+#     开一个新的数据出口，而这个出口没有经过任何权限评审。
+#
+# ⚠️ 注意：**不要在这里改 permission / kind / side_effect**。
+# 那三个字段是权限模型的输入，它们的设计评审不应该发生在配置层。
+# 真要调，改代码并走一次评审。
+#
+# 能安全覆盖的字段：cost / latency_ms / targets（区分力）/ description
+
+tools:
+  # 环境（业务）数据源的响应时间差异很大，成本估计要贴近真实，
+  # 否则规划器会在大表上盲目选择扫描类工具。
+  query_transaction_history:
+    cost: 1.5
+    latency_ms: 320
+
+  # 图计算是离线能力，一次调用要等近一秒 —— 成本系数要体现这一点，
+  # 否则规划器会为了省钱反复调用它。
+  run_graph_analysis:
+    cost: 2.5
+    latency_ms: 900
+
+  # 案件检索很便宜，但它**不区分假设**（evidence_map 为空），
+  # 所以便宜不会让它被提前选中 —— 规划器只在没有可做的检查时才用它。
+  search_similar_cases:
+    cost: 0.8
+    latency_ms: 300
