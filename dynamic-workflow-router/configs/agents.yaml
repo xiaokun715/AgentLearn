@@ -1,0 +1,35 @@
+# Agent Pool 的声明式覆盖层
+#
+# 约定（与本书其它章节一致）：
+#   · 代码里声明池子的默认值（app/pool/agents.py::BUILTIN_AGENTS）；
+#   · 本文件只做**覆盖**，且只能覆盖**已存在**的 Agent ——
+#     允许 YAML 凭空造一个 Agent，等于让运维改一次配置就能引入一个
+#     没有实现、没有数据流契约、没人测过的执行体。
+#
+# 能覆盖的字段：cost / latency_ms / risk / health / health_factor /
+#               capabilities / reads / writes / description
+#
+# 最常见的用法是**运维态**的覆盖：某个 Agent 在降级、某个在维护。
+
+agents:
+  # 环境探针依赖被测设备，真实环境里它经常是整个链路上最慢的一环。
+  # 这里把它的时延标出来，让路由的成本估计更接近真实（§4.4）。
+  env_prober:
+    latency_ms: 1200
+
+  # 根因分析要读三份证据，成本最高 —— 不该被轻率地放进每一个编排里。
+  root_cause_analyst:
+    cost: 3.0
+
+  # 示例：把某个 Agent 标成降级（可用但变慢变贵）。
+  # 取消注释即可看到路由把它降权、以及模板引用它时被标 BROKEN 的行为。
+  #
+  # metric_query:
+  #   health: DEGRADED
+  #   health_factor: 0.6
+  #
+  # 示例：把某个 Agent 下线。所有引用它的模板会在下一次 audit_health() 时
+  # 被标记为 BROKEN，路由不再选中它们（§13.3）。
+  #
+  # style_reviewer:
+  #   health: OFFLINE

@@ -1,0 +1,39 @@
+[project]
+name = "dynamic-workflow-router"
+version = "0.1.0"
+description = "Dynamic Workflow Router —— 意图识别 → 路由引擎 → 子 Agent / 已有模板 / 现场编排，带标签的模板库与保存-丢弃闭环"
+readme = "README.md"
+requires-python = ">=3.10"
+
+# 依赖刻意保持极少：全章的结论都由一个确定性的「虚拟时钟 + 黑板书」执行器产出。
+# LLM 由 ScriptedLLM 扮演（app/llm.py），接真机时换掉那一个类即可。
+dependencies = [
+    "pydantic>=2.0",    # 意图 / 模板 / 决策 都是受约束的契约
+    "pyyaml>=6.0",      # configs/agents.yaml、configs/templates.yaml
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+workflow-router = "app.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
