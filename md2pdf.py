@@ -24,6 +24,9 @@
     python md2pdf.py input.md --chapter-breaks   # 每个 H1 另起一页
     python md2pdf.py input.md --keep-html         # 保留中间 HTML，便于调样式
 
+    # 题库类文档（标题块 + 红字答案块 + 居中页码）
+    python md2pdf.py 交叉主管面.md --theme doc         --header "非技术面试准备材料" --subtitle "非技术面试准备材料 · 答题模板"
+
 依赖
 ----
     pip install markdown pygments playwright
@@ -185,6 +188,9 @@ pre {
   border: 1px solid #e6eaef;
   border-radius: 5px;
   font-size: 8.6pt;
+  /* 注意：Pygments 会注入 `pre { line-height: 125% }` 且排在本文件之后，
+     所以这里写的倍数在 codehilite 包裹的代码块上并不会生效 ——
+     想控制行高要用 `.codehilite pre`（见 DOC_THEME_CSS）。 */
   line-height: 1.55;
   /* 代码块很长时必须允许跨页，否则会整块被推到下一页甚至溢出 */
   break-inside: auto;
@@ -283,7 +289,95 @@ p, li, blockquote { orphans: 3; widows: 3; }
 
 /* 文档信息放在页脚（由浏览器打印参数渲染），不占正文首行 ——
    放在正文最前面会让第一页只剩一行元信息，标题反而被挤到下一页。 */
+
+/* ---------------- 自动标题块 ---------------- */
+/* 当 Markdown 没有 H1 时，由 --title / 文件名补一个标题块。
+   放在正文最前面会让第一页只剩一行元信息，标题反而被挤到下一页。 */
+.doc-subtitle {
+  font-size: 9.5pt;
+  color: #6a7280;
+  margin: -0.15em 0 1.3em;
+  padding-bottom: 0.9em;
+  border-bottom: 1px solid var(--border);
+}
 """
+
+# ======================================================================
+# 可选主题：复刻「浏览器打印 + 自定义 CSS」那套既有排版
+# ======================================================================
+#: 用于面试题库这类文档。它和默认主题的区别不只是配色，还有几处结构性差异：
+#:
+#: * 标题块（标题 + 副标题 + 深色横线）由文件名/参数补出来；
+#: * 答案写在 ``` 围栏里，渲染成**浅底 + 蓝色左条 + 红字**的引用式块；
+#: * 页脚只有一个居中的「N / M」。
+#:
+#: 默认主题不这么做，因为它同时要服务带真实代码的设计文档 ——
+#: 把 `pre` 里的文字全染成红色，代码就没法看了。
+DOC_THEME_CSS = r"""
+:root {
+  --fg: #1f2328;
+  --fg-soft: #50565d;
+  --border: #e3e8ee;
+  --bg-soft: #f6f8fa;
+  --accent: #2f6fbf;
+  --accent-soft: #f6f8fa;
+  --code-bg: #f6f8fa;
+}
+
+body { font-size: 9.8pt; line-height: 1.7; }
+
+h1 {
+  font-size: 21pt;
+  color: #1f3a5e;
+  border-bottom: 1.5pt solid #1f3a5e;
+  padding-bottom: 0.45em;
+  margin-bottom: 0.35em;
+}
+h2 {
+  font-size: 13.5pt;
+  color: #1f3a5e;
+  border-left: 3pt solid #2f6fbf;
+  padding-left: 0.5em;
+  /* 题库的竖向节奏比技术文档松：题与题之间留出明显的呼吸区 */
+  margin: 1.05em 0 0.45em;
+}
+h3 { font-size: 11.6pt; color: #1f3a5e; }
+h4 { font-size: 10.4pt; color: #1f3a5e; }
+
+p { margin: 0.55em 0; }
+
+/* 围栏块 = 答案块：浅底 + 蓝左条 + 红字 */
+pre {
+  background: #f6f8fa;
+  border: 1px solid #e3e8ee;
+  border-left: 3pt solid #2f6fbf;
+  border-radius: 4px;
+  font-size: 9pt;
+  padding: 1.0em 1em;
+  margin: 0.6em 0;
+}
+/* Pygments 会注入 `pre { line-height: 125% }`，而且它排在自定义样式**之后**，
+   同优先级下把我们设的行高覆盖掉 —— 表现是答案块比参考文档矮一截。
+   用 `.codehilite pre`（多一个类，优先级更高）把它压回去。 */
+.codehilite pre { line-height: 14.4pt; }
+pre code { color: #b31c28; }
+
+blockquote {
+  background: #f6f8fa;
+  border-left: 3pt solid #2f6fbf;
+  color: #1f2328;
+}
+
+table { font-size: 9pt; }
+th { background: #f0f3f7; color: #1f3a5e; }
+"""
+
+#: 可选主题。``default`` 不追加任何东西（样式都在 BASE_CSS 里）。
+THEME_CSS: dict[str, str] = {
+    "default": "",
+    "doc": DOC_THEME_CSS,
+}
+
 
 #: Pygments 的代码高亮样式（浅色，打印友好）
 Pygments_styles: str = ""
@@ -384,6 +478,23 @@ def extract_title(text: str, fallback: str) -> str:
     return fallback
 
 
+def has_h1(text: str) -> bool:
+    return any(re.match(r"^#\s+\S", line) for line in text.splitlines())
+
+
+def build_title_block(title: str, subtitle: str) -> str:
+    """Markdown 没有 H1 时，补一个标题块。
+
+    很多文档（尤其是「每题一段」的题库）直接从 ``## 1. …`` 开始，
+    没有文档标题。原样渲染出来的 PDF 第一页就是一道题，看起来像缺了头 ——
+    所以这里用文件名（或 ``--title``）补一个。
+    """
+    block = f'<h1 class="doc-title">{escape(title)}</h1>\n'
+    if subtitle:
+        block += f'<div class="doc-subtitle">{escape(subtitle)}</div>\n'
+    return block
+
+
 def build_html(
     body: str,
     *,
@@ -465,6 +576,8 @@ def render_with_playwright(
     outline: bool,
     margin_mm: tuple[float, float, float, float],
     landscape: bool,
+    header_text: str = "",
+    footer_style: str = "title-page",
 ) -> None:
     """用 Playwright 的 Chromium 打印。优先走这条 —— 它能控制页眉页脚和 PDF 大纲。"""
     from playwright.sync_api import sync_playwright
@@ -475,16 +588,41 @@ def render_with_playwright(
     # 只传 ``outline=True`` 时 Chrome 会静默忽略 —— 生成的 PDF 一条书签都没有，
     # 而且不报错。实测：outline=True/tagged=False → 0 条；两者都开 → 51 条。
     want_outline = outline and {"outline", "tagged"} <= supported
-    # 页脚模板是独立渲染的，拿不到页面 CSS —— 样式必须内联。
-    footer = (
-        '<div style="width:100%;font-size:8pt;color:#888;'
-        "font-family:'Microsoft YaHei','Segoe UI',sans-serif;"
-        'padding:0 16mm;display:flex;justify-content:space-between;">'
-        f"<span>{escape(title)}</span>"
-        "<span>第 <span class=\"pageNumber\"></span> / "
-        '<span class="totalPages"></span> 页</span>'
-        "</div>"
+
+    # 页眉页脚模板是独立渲染的，拿不到页面 CSS —— 样式必须内联。
+    # doc 主题沿用题库既有排版的小字号灰色页眉页脚；默认主题保持稍大一点。
+    if footer_style == "page":
+        base_style = (
+            "width:100%;font-size:5.6pt;color:#50565d;"
+            "font-family:'Microsoft YaHei','Segoe UI',sans-serif;"
+            "padding:0 14.8mm;"
+        )
+    else:
+        base_style = (
+            "width:100%;font-size:8pt;color:#888;"
+            "font-family:'Microsoft YaHei','Segoe UI',sans-serif;"
+            "padding:0 15mm;"
+        )
+    if footer_style == "page":
+        # 只有居中的「N / M」—— 题库类文档的既有排版就是这样
+        footer = (
+            f'<div style="{base_style}text-align:center;">'
+            '<span class="pageNumber"></span> / <span class="totalPages"></span>'
+            "</div>"
+        )
+    else:
+        footer = (
+            f'<div style="{base_style}display:flex;justify-content:space-between;">'
+            f"<span>{escape(title)}</span>"
+            "<span>第 <span class=\"pageNumber\"></span> / "
+            '<span class="totalPages"></span> 页</span>'
+            "</div>"
+        )
+    header = (
+        f'<div style="{base_style}text-align:right;">{escape(header_text)}</div>'
+        if header_text else "<div></div>"
     )
+    show_chrome = page_numbers or bool(header_text)
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         try:
@@ -498,8 +636,8 @@ def render_with_playwright(
                 "format": "A4",
                 "landscape": landscape,
                 "print_background": True,
-                "display_header_footer": page_numbers,
-                "header_template": "<div></div>",
+                "display_header_footer": show_chrome,
+                "header_template": header,
                 "footer_template": footer if page_numbers else "<div></div>",
                 "margin": {
                     "top": f"{top}mm",
@@ -574,15 +712,25 @@ def convert_one(
     keep_html: bool,
     browser_path: Optional[str],
     verbose: bool,
+    theme: str = "default",
+    title_override: str = "",
+    subtitle: str = "",
+    header_text: str = "",
 ) -> Path:
     text = src.read_text(encoding="utf-8")
     body = markdown_to_body(text)
-    title = extract_title(text, src.stem)
 
+    # 文档没有 H1 时补一个标题块（标题取 --title，否则用文件名）
+    if not has_h1(text):
+        body = build_title_block(title_override or src.stem, subtitle) + body
+
+    title = title_override or extract_title(text, src.stem)
+
+    css_parts = [BASE_CSS, THEME_CSS.get(theme, ""), extra_css]
     html_doc = build_html(
         body,
         title=title,
-        css=BASE_CSS + "\n" + extra_css,
+        css="\n".join(part for part in css_parts if part),
         chapter_breaks=chapter_breaks,
     )
 
@@ -600,6 +748,8 @@ def convert_one(
                 html_path, pdf_path, title=title if show_meta else "",
                 page_numbers=page_numbers, outline=outline,
                 margin_mm=margin_mm, landscape=landscape,
+                header_text=header_text,
+                footer_style="page" if theme == "doc" else "title-page",
             )
             engine = "playwright/chromium"
             if outline and {"outline", "tagged"} <= pdf_param_names():
@@ -678,6 +828,14 @@ def main(argv: Optional[list[str]] = None) -> int:
                         help="页边距：上,右,下,左（毫米），默认 18,16,20,16")
     parser.add_argument("--no-meta", action="store_true",
                         help="页脚不显示文档标题（只保留页码）")
+    parser.add_argument("--theme", default="default", choices=sorted(THEME_CSS),
+                        help="排版主题：default（技术文档）/ doc（题库：标题块 + 红字答案块 + 居中页码）")
+    parser.add_argument("--title", default="",
+                        help="文档标题（默认取第一个 H1；没有 H1 时用文件名）")
+    parser.add_argument("--subtitle", default="",
+                        help="标题下方的一行说明（仅在文档没有 H1、生成了标题块时显示）")
+    parser.add_argument("--header", default="",
+                        help="页眉文字，显示在右上角")
     parser.add_argument("--keep-html", action="store_true",
                         help="保留中间 HTML（调样式时有用）")
     parser.add_argument("-q", "--quiet", action="store_true", help="静默模式")
@@ -725,6 +883,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                 show_meta=not args.no_meta,
                 outline=not args.no_outline,
                 keep_html=args.keep_html,
+                theme=args.theme,
+                title_override=args.title,
+                subtitle=args.subtitle,
+                header_text=args.header,
                 browser_path=fallback_browser,
                 verbose=not args.quiet,
             )
