@@ -1,0 +1,6 @@
+Hadoop MapReduce is a programming model.
+MapReduce splits work into map and reduce tasks.
+A mapper emits key value pairs.
+A reducer groups values by key.
+MapReduce can process large data sets.
+Hadoop runs tasks across a cluster.
